@@ -19,6 +19,7 @@ import type { ElectionProviders, DeployedElectionContract } from './types.js';
 import * as api from './api.js';
 
 const GENESIS_SEED = '0000000000000000000000000000000000000000000000000000000000000001';
+const GENESIS_SEED_2 = 'c72387a1b01651fd8264f1535b44fb5aab3e33a9e78eb7b07ee7b7e15aef3301c72387a1b01651fd8264f1535b44fb5aab3e33a9e78eb7b07ee7b7e15aef3301';
 
 const rli = createInterface({ input, output });
 
@@ -33,21 +34,26 @@ async function promptChoice(): Promise<string> {
 // ── Wallet Setup ───────────────────────────────────────────────────────
 
 async function setupWallet(config: Config): Promise<WalletContext> {
-  if (config instanceof StandaloneConfig) {
-    return await buildWalletAndWaitForFunds(config, GENESIS_SEED);
-  }
+  const isStandalone = config instanceof StandaloneConfig;
 
   console.log('');
   console.log(`  ${c.white}Wallet setup:${c.reset}`);
-  console.log(`    ${c.cyan}1${c.reset}  Create new wallet`);
-  console.log(`    ${c.cyan}2${c.reset}  Restore from hex seed`);
+  if (isStandalone) {
+    console.log(`  ${c.dim}(Standalone: use genesis seed 1 for first terminal, genesis seed 2 for second)${c.reset}`);
+  }
+  console.log(`    ${c.cyan}1${c.reset}  Genesis seed 1 (pre-funded, use for first terminal)`);
+  console.log(`    ${c.cyan}2${c.reset}  Genesis seed 2 (pre-funded, use for second terminal)`);
+  console.log(`    ${c.cyan}3${c.reset}  Create new wallet`);
+  console.log(`    ${c.cyan}4${c.reset}  Restore from hex seed`);
   console.log('');
 
   while (true) {
     const choice = await promptChoice();
     switch (choice) {
-      case '1': return await buildFreshWallet(config);
-      case '2': {
+      case '1': return await buildWalletAndWaitForFunds(config, GENESIS_SEED);
+      case '2': return await buildWalletAndWaitForFunds(config, GENESIS_SEED_2);
+      case '3': return await buildFreshWallet(config);
+      case '4': {
         const seed = await prompt('Enter hex seed: ');
         return await buildWalletAndWaitForFunds(config, seed);
       }
