@@ -1,0 +1,80 @@
+pragma language_version >= 0.20;
+
+export { mint, mint_unshielded, burn, get_total_supply, get_color }
+
+import CompactStandardLibrary;
+
+// ── Ledger State ──────────────────────────────────────────────────────
+ledger owner: Bytes<32>;
+ledger total_supply: Counter;
+ledger domain_separator: Bytes<32>;
+
+// ── Witnesses ─────────────────────────────────────────────────────────
+witness local$secret_key(): Bytes<32>;
+witness local$nonce(): Bytes<32>;
+
+// ── Constructor ───────────────────────────────────────────────────────
+constructor(domain_sep: Bytes<32>) {
+  const sk = local$secret_key();
+  owner = derive_public_key(sk);
+  domain_separator = disclose(domain_sep);
+}
+
+// ── Access Control ────────────────────────────────────────────────────
+circuit derive_public_key(sk: Bytes<32>): Bytes<32> {
+  return disclose(persistentHash<Vector<2, Bytes<32>>>([pad(32, "midnight:token:pk:"), sk]));
+}
+
+circuit assert_owner(): [] {
+  const sk = local$secret_key();
+  const pk = derive_public_key(sk);
+  assert(pk == owner, "Only owner can perform this action");
+}
+
+// ── Shielded Mint: owner mints shielded tokens to a recipient ────────
+// Amount limited to Uint<16> (max 65535) per tx due to Counter constraint.
+circuit mint(amount: Uint<16>, recipient_key: ZswapCoinPublicKey): ShieldedCoinInfo {
+  assert_owner();
+  assert(disclose(amount) > 0, "Amount must be greater than zero");
+  const nonce = disclose(local$nonce());
+  const ds = domain_separator;
+  total_supply.increment(disclose(amount));
+  return mintShieldedToken(
+    ds,
+    disclose(amount),
+    nonce,
+    left<ZswapCoinPublicKey, ContractAddress>(disclose(recipient_key))
+  );
+}
+
+// ── Unshielded Mint: owner mints unshielded UTXO tokens to a user ────
+// Recipient is a UserAddress (secp256k1 public key hash).
+// Returns the token color (Bytes<32>).
+circuit mint_unshielded(amount: Uint<16>, recipient: UserAddress): Bytes<32> {
+  assert_owner();
+  assert(disclose(amount) > 0, "Amount must be greater than zero");
+  const ds = domain_separator;
+  total_supply.increment(disclose(amount));
+  return mintUnshieldedToken(
+    ds,
+    disclose(amount) as Uint<64>,
+    right<ContractAddress, UserAddress>(disclose(recipient))
+  );
+}
+
+// ── Burn: anyone can burn their shielded tokens ───────────────────────
+circuit burn(coin: ShieldedCoinInfo): [] {
+  assert(coin.value > 0, "Amount must be greater than zero");
+  assert(coin.color == tokenType(domain_separator, kernel.self()), "Wrong token color");
+  receiveShielded(disclose(coin));
+}
+
+// ── Read total supply ─────────────────────────────────────────────────
+circuit get_total_supply(): Uint<64> {
+  return total_supply;
+}
+
+// ── Get token color ───────────────────────────────────────────────────
+circuit get_color(): Bytes<32> {
+  return tokenType(domain_separator, kernel.self());
+}
