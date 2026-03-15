@@ -1,0 +1,37 @@
+diff --git a/node_modules/@midnight-ntwrk/compact-js/dist/esm/effect/ContractExecutable.js b/node_modules/@midnight-ntwrk/compact-js/dist/esm/effect/ContractExecutable.js
+index 35cdb94..df87eb1 100644
+--- a/node_modules/@midnight-ntwrk/compact-js/dist/esm/effect/ContractExecutable.js
++++ b/node_modules/@midnight-ntwrk/compact-js/dist/esm/effect/ContractExecutable.js
+@@ -27,8 +27,31 @@ import * as CompactContextInternal from './internal/compactContext.js';
+ import { ZKConfiguration } from './ZKConfiguration.js';
+ const DEFAULT_CMA_THRESHOLD = 1;
+ const DEFAULT_SIGNATURE_INDEX = 0n;
++// PATCH: Rehash BoundedMerkleTree entries after encode/decode round-trip.
++// The decode() call produces BMTs with missing internal hashes, causing
++// partitionTranscripts to fail with "attempted to take root of non-rehashed bmt".
++// See: https://github.com/Jalal-1/mnf-se-examples — election contract with BMT state.
++const rehashLedgerStateValue = (sv) => {
++    switch (sv.type()) {
++        case 'boundedMerkleTree': {
++            const tree = sv.asBoundedMerkleTree();
++            return tree ? LedgerStateValue.newBoundedMerkleTree(tree.rehash()) : sv;
++        }
++        case 'array': {
++            const arr = sv.asArray();
++            if (!arr) return sv;
++            let result = LedgerStateValue.newArray();
++            for (const child of arr) {
++                result = result.arrayPush(rehashLedgerStateValue(child));
++            }
++            return result;
++        }
++        default:
++            return sv;
++    }
++};
+ const asLedgerQueryContext = (queryContext) => {
+-    const stateValue = LedgerStateValue.decode(queryContext.state.state.encode());
++    const stateValue = rehashLedgerStateValue(LedgerStateValue.decode(queryContext.state.state.encode()));
+     const ledgerQueryContext = new LedgerQueryContext(new LedgerChargedState(stateValue), queryContext.address);
+     // The above method of converting to ledger query context only retains the state. So, we have to set the settable properties manually
+     ledgerQueryContext.block = queryContext.block;

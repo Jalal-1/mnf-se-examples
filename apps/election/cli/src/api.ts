@@ -317,7 +317,7 @@ export const configureProviders = async (ctx: WalletContext, config: Config): Pr
     privateStateProvider: levelPrivateStateProvider<typeof ElectionPrivateStateId>({
       privateStateStoreName: contractConfig.privateStateStoreName,
       privateStoragePasswordProvider: () => 'MnfElection-Pr1vate!',
-      accountId: ctx.unshieldedKeystore.getBech32Address().asString(),
+      accountId: `${ctx.unshieldedKeystore.getBech32Address().asString()}-${Buffer.from(randomBytes(8)).toString('hex')}`,
     }),
     publicDataProvider: wrapPublicDataProviderWithRehash(
       indexerPublicDataProvider(config.indexer, config.indexerWS),

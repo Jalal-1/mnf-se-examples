@@ -19,7 +19,6 @@ import type { ElectionProviders, DeployedElectionContract } from './types.js';
 import * as api from './api.js';
 
 const GENESIS_SEED = '0000000000000000000000000000000000000000000000000000000000000001';
-const GENESIS_SEED_2 = 'c72387a1b01651fd8264f1535b44fb5aab3e33a9e78eb7b07ee7b7e15aef3301c72387a1b01651fd8264f1535b44fb5aab3e33a9e78eb7b07ee7b7e15aef3301';
 
 const rli = createInterface({ input, output });
 
@@ -34,26 +33,24 @@ async function promptChoice(): Promise<string> {
 // ── Wallet Setup ───────────────────────────────────────────────────────
 
 async function setupWallet(config: Config): Promise<WalletContext> {
-  const isStandalone = config instanceof StandaloneConfig;
+  if (config instanceof StandaloneConfig) {
+    console.log('');
+    console.log(`  ${c.dim}Standalone: using pre-funded genesis wallet for fees.${c.reset}`);
+    console.log(`  ${c.dim}Authority/voter keys are separate from the wallet — multiple terminals can share this wallet.${c.reset}`);
+    return await buildWalletAndWaitForFunds(config, GENESIS_SEED);
+  }
 
   console.log('');
   console.log(`  ${c.white}Wallet setup:${c.reset}`);
-  if (isStandalone) {
-    console.log(`  ${c.dim}(Standalone: use genesis seed 1 for first terminal, genesis seed 2 for second)${c.reset}`);
-  }
-  console.log(`    ${c.cyan}1${c.reset}  Genesis seed 1 (pre-funded, use for first terminal)`);
-  console.log(`    ${c.cyan}2${c.reset}  Genesis seed 2 (pre-funded, use for second terminal)`);
-  console.log(`    ${c.cyan}3${c.reset}  Create new wallet`);
-  console.log(`    ${c.cyan}4${c.reset}  Restore from hex seed`);
+  console.log(`    ${c.cyan}1${c.reset}  Create new wallet`);
+  console.log(`    ${c.cyan}2${c.reset}  Restore from hex seed`);
   console.log('');
 
   while (true) {
     const choice = await promptChoice();
     switch (choice) {
-      case '1': return await buildWalletAndWaitForFunds(config, GENESIS_SEED);
-      case '2': return await buildWalletAndWaitForFunds(config, GENESIS_SEED_2);
-      case '3': return await buildFreshWallet(config);
-      case '4': {
+      case '1': return await buildFreshWallet(config);
+      case '2': {
         const seed = await prompt('Enter hex seed: ');
         return await buildWalletAndWaitForFunds(config, seed);
       }
@@ -103,44 +100,64 @@ async function authorityLoop(
   while (true) {
     const state = await api.getElectionState(providers, contractAddress);
     renderState(state, contractAddress, 'authority');
+    const phase = state?.state ?? -1;
 
-    console.log(`    ${c.cyan}1${c.reset}  Set election topic`);
-    console.log(`    ${c.cyan}2${c.reset}  Add eligible voter`);
-    console.log(`    ${c.cyan}3${c.reset}  Advance to next phase`);
-    console.log(`    ${c.cyan}4${c.reset}  Refresh`);
-    console.log(`    ${c.cyan}5${c.reset}  Exit`);
-    console.log('');
+    // Build menu options based on current phase
+    const options: { key: string; label: string; action: () => Promise<void> }[] = [];
 
-    const choice = await promptChoice();
-    try {
-      switch (choice) {
-        case '1': {
+    if (phase === 0) {
+      options.push({
+        key: String(options.length + 1), label: 'Set election topic',
+        action: async () => {
           const topic = await prompt('Election topic: ');
-          if (!topic) { console.log(`    ${c.red}Topic cannot be empty${c.reset}`); break; }
+          if (!topic) { console.log(`    ${c.red}Topic cannot be empty${c.reset}`); return; }
           console.log(`\n    ${c.dim}Submitting...${c.reset}`);
           await api.setTopic(contract, topic);
           console.log(`    ${c.green}Topic set!${c.reset}\n`);
-          break;
-        }
-        case '2': {
+        },
+      });
+      options.push({
+        key: String(options.length + 1), label: 'Add eligible voter',
+        action: async () => {
           const pkHex = await prompt('Voter public key (hex): ');
           const pk = new Uint8Array(Buffer.from(pkHex, 'hex'));
-          if (pk.length !== 32) { console.log(`    ${c.red}Must be 32 bytes (64 hex)${c.reset}`); break; }
+          if (pk.length !== 32) { console.log(`    ${c.red}Must be 32 bytes (64 hex)${c.reset}`); return; }
           console.log(`\n    ${c.dim}Submitting...${c.reset}`);
           await api.addVoter(contract, providers, pk);
           console.log(`    ${c.green}Voter added!${c.reset}\n`);
-          break;
-        }
-        case '3': {
+        },
+      });
+    }
+
+    if (phase >= 0 && phase < 3) {
+      const nextPhase = ['commit', 'reveal', 'final'][phase];
+      options.push({
+        key: String(options.length + 1), label: `Advance to ${nextPhase} phase`,
+        action: async () => {
           console.log(`\n    ${c.dim}Submitting...${c.reset}`);
           await api.advance(contract);
-          console.log(`    ${c.green}Phase advanced!${c.reset}\n`);
-          break;
-        }
-        case '4': break;
-        case '5': return;
-        default: console.log(`    ${c.red}Invalid choice${c.reset}`);
-      }
+          console.log(`    ${c.green}Phase advanced to ${nextPhase}!${c.reset}\n`);
+        },
+      });
+    }
+
+    const refreshKey = String(options.length + 1);
+    const exitKey = String(options.length + 2);
+
+    for (const opt of options) console.log(`    ${c.cyan}${opt.key}${c.reset}  ${opt.label}`);
+    console.log(`    ${c.cyan}${refreshKey}${c.reset}  Refresh`);
+    console.log(`    ${c.cyan}${exitKey}${c.reset}  Exit`);
+    console.log('');
+
+    const choice = await promptChoice();
+    if (choice === exitKey) return;
+    if (choice === refreshKey) continue;
+
+    const selected = options.find((o) => o.key === choice);
+    if (!selected) { console.log(`    ${c.red}Invalid choice${c.reset}`); continue; }
+
+    try {
+      await selected.action();
     } catch (e) {
       const raw = e instanceof Error ? e.message : String(e);
       const m = raw.match(/failed assert:\s*(.+)/);
@@ -159,35 +176,54 @@ async function voterLoop(
   while (true) {
     const state = await api.getElectionState(providers, contractAddress);
     renderState(state, contractAddress, 'voter');
+    const phase = state?.state ?? -1;
 
-    console.log(`    ${c.green}1${c.reset}  Cast vote (commit)`);
-    console.log(`    ${c.green}2${c.reset}  Reveal vote`);
-    console.log(`    ${c.green}3${c.reset}  Refresh`);
-    console.log(`    ${c.green}4${c.reset}  Exit`);
-    console.log('');
+    const options: { key: string; label: string; action: () => Promise<void> }[] = [];
 
-    const choice = await promptChoice();
-    try {
-      switch (choice) {
-        case '1': {
+    if (phase === 0) {
+      console.log(`    ${c.dim}Waiting for authority to start the voting phase...${c.reset}`);
+    } else if (phase === 1) {
+      options.push({
+        key: String(options.length + 1), label: 'Cast vote (commit)',
+        action: async () => {
           const voteStr = await prompt('Vote (yes/no): ');
           const ballot = voteStr.toLowerCase() === 'yes' ? 0 : voteStr.toLowerCase() === 'no' ? 1 : -1;
-          if (ballot === -1) { console.log(`    ${c.red}Must be 'yes' or 'no'${c.reset}`); break; }
+          if (ballot === -1) { console.log(`    ${c.red}Must be 'yes' or 'no'${c.reset}`); return; }
           console.log(`\n    ${c.dim}Generating proof and submitting...${c.reset}`);
           await api.voteCommit(contract, providers, ballot);
           console.log(`    ${c.green}Vote committed!${c.reset}\n`);
-          break;
-        }
-        case '2': {
+        },
+      });
+    } else if (phase === 2) {
+      options.push({
+        key: String(options.length + 1), label: 'Reveal vote',
+        action: async () => {
           console.log(`\n    ${c.dim}Generating proof and submitting...${c.reset}`);
           await api.voteReveal(contract, providers);
           console.log(`    ${c.green}Vote revealed!${c.reset}\n`);
-          break;
-        }
-        case '3': break;
-        case '4': return;
-        default: console.log(`    ${c.red}Invalid choice${c.reset}`);
-      }
+        },
+      });
+    } else if (phase === 3) {
+      console.log(`    ${c.dim}Election completed. Final results shown above.${c.reset}`);
+    }
+
+    const refreshKey = String(options.length + 1);
+    const exitKey = String(options.length + 2);
+
+    for (const opt of options) console.log(`    ${c.green}${opt.key}${c.reset}  ${opt.label}`);
+    console.log(`    ${c.green}${refreshKey}${c.reset}  Refresh`);
+    console.log(`    ${c.green}${exitKey}${c.reset}  Exit`);
+    console.log('');
+
+    const choice = await promptChoice();
+    if (choice === exitKey) return;
+    if (choice === refreshKey) continue;
+
+    const selected = options.find((o) => o.key === choice);
+    if (!selected) { console.log(`    ${c.red}Invalid choice${c.reset}`); continue; }
+
+    try {
+      await selected.action();
     } catch (e) {
       const raw = e instanceof Error ? e.message : String(e);
       const m = raw.match(/failed assert:\s*(.+)/);
