@@ -209,7 +209,7 @@ export const configureProviders = async (ctx: WalletContext, config: Config): Pr
   return {
     privateStateProvider: levelPrivateStateProvider<typeof NftPrivateStateId>({
       privateStateStoreName: contractConfig.privateStateStoreName,
-      privateStoragePasswordProvider: () => 'MnfNft-Pr1vate!',
+      privateStoragePasswordProvider: () => 'MnfNft-Pr1vat3S!',
       accountId: ctx.unshieldedKeystore.getBech32Address().asString(),
     }),
     publicDataProvider: indexerPublicDataProvider(config.indexer, config.indexerWS),

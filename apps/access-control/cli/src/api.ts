@@ -1,5 +1,5 @@
 import { type ContractAddress } from '@midnight-ntwrk/compact-runtime';
-import { FungibleToken, type FungibleTokenPrivateState } from '@mnf-se/fungible-token-contract';
+import { AccessControl, type AccessControlPrivateState } from '@mnf-se/access-control-contract';
 import * as ledger from '@midnight-ntwrk/ledger-v7';
 import { CompiledContract } from '@midnight-ntwrk/compact-js';
 import { deployContract, findDeployedContract } from '@midnight-ntwrk/midnight-js-contracts';
@@ -8,7 +8,6 @@ import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-p
 import { levelPrivateStateProvider } from '@midnight-ntwrk/midnight-js-level-private-state-provider';
 import { NodeZkConfigProvider } from '@midnight-ntwrk/midnight-js-node-zk-config-provider';
 import type { FinalizedTxData } from '@midnight-ntwrk/midnight-js-types';
-import { assertIsContractAddress } from '@midnight-ntwrk/midnight-js-utils';
 import { type Logger } from 'pino';
 import path from 'node:path';
 import { WebSocket } from 'ws';
@@ -20,10 +19,10 @@ import {
 } from '@mnf-se/common';
 
 import {
-  type FungibleTokenCircuits,
-  type FungibleTokenProviders,
-  type DeployedFungibleTokenContract,
-  FungibleTokenPrivateStateId,
+  type AccessControlCircuits,
+  type AccessControlProviders,
+  type DeployedAccessControlContract,
+  AccessControlPrivateStateId,
 } from './types.js';
 
 // @ts-expect-error: It's needed to enable WebSocket usage through apollo
@@ -34,16 +33,16 @@ let logger: Logger;
 const currentDir = path.resolve(new URL(import.meta.url).pathname, '..');
 
 const contractConfig = {
-  privateStateStoreName: 'fungible-token-private-state',
-  zkConfigPath: path.resolve(currentDir, '..', '..', 'contract', 'src', 'managed', 'fungible-token'),
+  privateStateStoreName: 'access-control-private-state',
+  zkConfigPath: path.resolve(currentDir, '..', '..', 'contract', 'src', 'managed', 'access-control'),
 };
 
 // ── Compiled Contract ──────────────────────────────────────────────────
-// FungibleToken has no local witnesses — identity comes from ownPublicKey() built-in
+// AccessControl has no local witnesses — identity comes from ownPublicKey() built-in
 
-const fungibleTokenCompiledContract = CompiledContract.make(
-  'FungibleToken',
-  FungibleToken.Contract,
+const accessControlCompiledContract = CompiledContract.make(
+  'AccessControl',
+  AccessControl.Contract,
 ).pipe(
   CompiledContract.withVacantWitnesses,
   CompiledContract.withCompiledFileAssets(contractConfig.zkConfigPath),
@@ -53,17 +52,17 @@ const fungibleTokenCompiledContract = CompiledContract.make(
 
 type Either<A, B> = { is_left: boolean; left: A; right: B };
 type ZswapCoinPublicKey = { bytes: Uint8Array };
-type FTContractAddress = { bytes: Uint8Array };
+type ACContractAddress = { bytes: Uint8Array };
 
 /** Wrap a ZswapCoinPublicKey as left(key) in an Either<ZswapCoinPublicKey, ContractAddress> */
-export const leftPublicKey = (pubKeyBytes: Uint8Array): Either<ZswapCoinPublicKey, FTContractAddress> => ({
+export const leftPublicKey = (pubKeyBytes: Uint8Array): Either<ZswapCoinPublicKey, ACContractAddress> => ({
   is_left: true,
   left: { bytes: pubKeyBytes },
   right: { bytes: new Uint8Array(32) },
 });
 
 /** Wrap a ContractAddress as right(addr) in an Either<ZswapCoinPublicKey, ContractAddress> */
-export const rightContractAddress = (addrBytes: Uint8Array): Either<ZswapCoinPublicKey, FTContractAddress> => ({
+export const rightContractAddress = (addrBytes: Uint8Array): Either<ZswapCoinPublicKey, ACContractAddress> => ({
   is_left: false,
   left: { bytes: new Uint8Array(32) },
   right: { bytes: addrBytes },
@@ -72,32 +71,26 @@ export const rightContractAddress = (addrBytes: Uint8Array): Either<ZswapCoinPub
 // ── Deploy / Join ──────────────────────────────────────────────────────
 
 export const deploy = async (
-  providers: FungibleTokenProviders,
-  name: string,
-  symbol: string,
-  decimals: bigint,
-): Promise<DeployedFungibleTokenContract> => {
-  logger.info(`Deploying FungibleToken contract (${name} / ${symbol} / ${decimals} decimals)...`);
+  providers: AccessControlProviders,
+): Promise<DeployedAccessControlContract> => {
+  logger.info('Deploying AccessControl contract...');
 
   const contract = await deployContract(providers as any, {
-    compiledContract: fungibleTokenCompiledContract,
-    privateStateId: FungibleTokenPrivateStateId,
-    initialPrivateState: {} as FungibleTokenPrivateState,
-    args: [name, symbol, decimals],
-  });
+    compiledContract: accessControlCompiledContract,
+  } as any);
   logger.info(`Deployed contract at address: ${contract.deployTxData.public.contractAddress}`);
   return contract as any;
 };
 
 export const joinContract = async (
-  providers: FungibleTokenProviders,
+  providers: AccessControlProviders,
   contractAddress: string,
-): Promise<DeployedFungibleTokenContract> => {
+): Promise<DeployedAccessControlContract> => {
   const contract = await findDeployedContract(providers as any, {
     contractAddress,
-    compiledContract: fungibleTokenCompiledContract,
-    privateStateId: FungibleTokenPrivateStateId,
-    initialPrivateState: {} as FungibleTokenPrivateState,
+    compiledContract: accessControlCompiledContract,
+    privateStateId: AccessControlPrivateStateId,
+    initialPrivateState: {} as AccessControlPrivateState,
   });
   logger.info(`Joined contract at address: ${contract.deployTxData.public.contractAddress}`);
   return contract as any;
@@ -105,99 +98,120 @@ export const joinContract = async (
 
 // ── Circuit Calls ──────────────────────────────────────────────────────
 
-export const mint = async (
-  contract: DeployedFungibleTokenContract,
-  account: Either<ZswapCoinPublicKey, FTContractAddress>,
-  value: bigint,
+export const increment = async (
+  contract: DeployedAccessControlContract,
 ): Promise<FinalizedTxData> => {
-  logger.info(`Minting ${value} tokens...`);
-  const finalizedTxData = await contract.callTx.mint(account, value);
+  logger.info('Incrementing counter...');
+  const finalizedTxData = await contract.callTx.increment();
   logger.info(`Transaction ${finalizedTxData.public.txId} added in block ${finalizedTxData.public.blockHeight}`);
   return finalizedTxData.public;
 };
 
-export const burn = async (
-  contract: DeployedFungibleTokenContract,
-  account: Either<ZswapCoinPublicKey, FTContractAddress>,
-  value: bigint,
+export const pause = async (
+  contract: DeployedAccessControlContract,
 ): Promise<FinalizedTxData> => {
-  logger.info(`Burning ${value} tokens...`);
-  const finalizedTxData = await contract.callTx.burn(account, value);
+  logger.info('Pausing contract...');
+  const finalizedTxData = await contract.callTx.pause();
   logger.info(`Transaction ${finalizedTxData.public.txId} added in block ${finalizedTxData.public.blockHeight}`);
   return finalizedTxData.public;
 };
 
-export const transfer = async (
-  contract: DeployedFungibleTokenContract,
-  to: Either<ZswapCoinPublicKey, FTContractAddress>,
-  value: bigint,
+export const unpause = async (
+  contract: DeployedAccessControlContract,
 ): Promise<FinalizedTxData> => {
-  logger.info(`Transferring ${value} tokens...`);
-  const finalizedTxData = await contract.callTx.transfer(to, value);
+  logger.info('Unpausing contract...');
+  const finalizedTxData = await contract.callTx.unpause();
   logger.info(`Transaction ${finalizedTxData.public.txId} added in block ${finalizedTxData.public.blockHeight}`);
   return finalizedTxData.public;
 };
 
-export const balanceOf = async (
-  contract: DeployedFungibleTokenContract,
-  account: Either<ZswapCoinPublicKey, FTContractAddress>,
-): Promise<{ tx: FinalizedTxData; balance: bigint }> => {
-  logger.info('Querying balanceOf...');
-  const finalizedTxData = await contract.callTx.balanceOf(account);
+export const grantRole = async (
+  contract: DeployedAccessControlContract,
+  roleId: Uint8Array,
+  account: Either<ZswapCoinPublicKey, ACContractAddress>,
+): Promise<FinalizedTxData> => {
+  logger.info('Granting role...');
+  const finalizedTxData = await contract.callTx.grantRole(roleId, account);
   logger.info(`Transaction ${finalizedTxData.public.txId} added in block ${finalizedTxData.public.blockHeight}`);
-  const balance = finalizedTxData.private.result as bigint;
-  logger.info(`Balance: ${balance}`);
-  return { tx: finalizedTxData.public, balance };
+  return finalizedTxData.public;
 };
 
-export const totalSupply = async (
-  contract: DeployedFungibleTokenContract,
-): Promise<{ tx: FinalizedTxData; supply: bigint }> => {
-  logger.info('Querying totalSupply...');
-  const finalizedTxData = await contract.callTx.totalSupply();
+export const revokeRole = async (
+  contract: DeployedAccessControlContract,
+  roleId: Uint8Array,
+  account: Either<ZswapCoinPublicKey, ACContractAddress>,
+): Promise<FinalizedTxData> => {
+  logger.info('Revoking role...');
+  const finalizedTxData = await contract.callTx.revokeRole(roleId, account);
   logger.info(`Transaction ${finalizedTxData.public.txId} added in block ${finalizedTxData.public.blockHeight}`);
-  const supply = finalizedTxData.private.result as bigint;
-  logger.info(`Total supply: ${supply}`);
-  return { tx: finalizedTxData.public, supply };
+  return finalizedTxData.public;
+};
+
+export const hasRole = async (
+  contract: DeployedAccessControlContract,
+  roleId: Uint8Array,
+  account: Either<ZswapCoinPublicKey, ACContractAddress>,
+): Promise<{ tx: FinalizedTxData; result: boolean }> => {
+  logger.info('Checking role...');
+  const finalizedTxData = await contract.callTx.hasRole(roleId, account);
+  logger.info(`Transaction ${finalizedTxData.public.txId} added in block ${finalizedTxData.public.blockHeight}`);
+  const result = finalizedTxData.private.result as boolean;
+  logger.info(`Has role: ${result}`);
+  return { tx: finalizedTxData.public, result };
+};
+
+export const renounceRole = async (
+  contract: DeployedAccessControlContract,
+  roleId: Uint8Array,
+  callerConfirmation: Either<ZswapCoinPublicKey, ACContractAddress>,
+): Promise<FinalizedTxData> => {
+  logger.info('Renouncing role...');
+  const finalizedTxData = await contract.callTx.renounceRole(roleId, callerConfirmation);
+  logger.info(`Transaction ${finalizedTxData.public.txId} added in block ${finalizedTxData.public.blockHeight}`);
+  return finalizedTxData.public;
 };
 
 // ── Read Contract State (via ledger query) ─────────────────────────────
 
-export type FungibleTokenState = {
-  name: string;
-  symbol: string;
-  decimals: bigint;
+export type AccessControlState = {
+  counter: bigint;
+  minterRole: Uint8Array;
+  pauserRole: Uint8Array;
+  defaultAdminRole: Uint8Array;
 };
 
-export const getTokenState = async (
-  contract: DeployedFungibleTokenContract,
-): Promise<FungibleTokenState | null> => {
-  try {
-    // Use callTx for read operations — the contract circuits return the values
-    const nameTx = await contract.callTx.name();
-    const symbolTx = await contract.callTx.symbol();
-    const decimalsTx = await contract.callTx.decimals();
+// DEFAULT_ADMIN_ROLE is Bytes<32> of all zeros (the default value in AccessControl module)
+const DEFAULT_ADMIN_ROLE_BYTES = new Uint8Array(32);
 
+export const getContractState = (
+  contract: DeployedAccessControlContract,
+): AccessControlState | null => {
+  try {
+    const contractState = (contract as any).deployTxData?.public?.initialContractState
+      ?? (contract as any).contractState;
+    if (!contractState?.data) return null;
+    const ledgerState = AccessControl.ledger(contractState.data);
     return {
-      name: String(nameTx.public.txId ? '(queried)' : ''),
-      symbol: String(symbolTx.public.txId ? '(queried)' : ''),
-      decimals: 0n,
+      counter: ledgerState.counter,
+      minterRole: ledgerState.MINTER_ROLE as Uint8Array,
+      pauserRole: ledgerState.PAUSER_ROLE as Uint8Array,
+      defaultAdminRole: DEFAULT_ADMIN_ROLE_BYTES,
     };
   } catch (e) {
-    logger.warn(`Failed to read token state: ${e}`);
+    logger.warn(`Failed to read contract state: ${e}`);
     return null;
   }
 };
 
 // ── Provider Configuration ──────────────────────────────────────────────
 
-export const configureProviders = async (ctx: WalletContext, config: Config): Promise<FungibleTokenProviders> => {
+export const configureProviders = async (ctx: WalletContext, config: Config): Promise<AccessControlProviders> => {
   const walletAndMidnightProvider = await createWalletAndMidnightProvider(ctx);
-  const zkConfigProvider = new NodeZkConfigProvider<FungibleTokenCircuits>(contractConfig.zkConfigPath);
+  const zkConfigProvider = new NodeZkConfigProvider<AccessControlCircuits>(contractConfig.zkConfigPath);
   return {
-    privateStateProvider: levelPrivateStateProvider<typeof FungibleTokenPrivateStateId>({
+    privateStateProvider: levelPrivateStateProvider<typeof AccessControlPrivateStateId>({
       privateStateStoreName: contractConfig.privateStateStoreName,
-      privateStoragePasswordProvider: () => 'MnfFungibleToken-Pr1vate!',
+      privateStoragePasswordProvider: () => 'MnfAccess-Ctr0l!',
       accountId: ctx.unshieldedKeystore.getBech32Address().asString(),
     }),
     publicDataProvider: indexerPublicDataProvider(config.indexer, config.indexerWS),

@@ -1,0 +1,70 @@
+pragma language_version >= 0.21;
+
+import CompactStandardLibrary;
+import "../../../../contracts/token/MultiToken" prefix MT_;
+
+export { ZswapCoinPublicKey, ContractAddress, Either };
+
+constructor(uri_: Opaque<"string">) {
+  MT_initialize(uri_);
+}
+
+// ── Read operations ──────────────────────────────────────────
+
+export circuit uri(id: Uint<128>): Opaque<"string"> {
+  return MT_uri(id);
+}
+
+export circuit balanceOf(
+  account: Either<ZswapCoinPublicKey, ContractAddress>,
+  id: Uint<128>
+): Uint<128> {
+  return MT_balanceOf(account, id);
+}
+
+export circuit isApprovedForAll(
+  account: Either<ZswapCoinPublicKey, ContractAddress>,
+  operator: Either<ZswapCoinPublicKey, ContractAddress>
+): Boolean {
+  return MT_isApprovedForAll(account, operator);
+}
+
+// ── Write operations ─────────────────────────────────────────
+
+export circuit setApprovalForAll(
+  operator: Either<ZswapCoinPublicKey, ContractAddress>,
+  approved: Boolean
+): [] {
+  return MT_setApprovalForAll(operator, approved);
+}
+
+export circuit transferFrom(
+  fromAddress: Either<ZswapCoinPublicKey, ContractAddress>,
+  to: Either<ZswapCoinPublicKey, ContractAddress>,
+  id: Uint<128>,
+  value: Uint<128>
+): [] {
+  return MT_transferFrom(fromAddress, to, id, value);
+}
+
+// ── Admin operations (exposed for demo, restrict in production) ──
+
+export circuit mint(
+  to: Either<ZswapCoinPublicKey, ContractAddress>,
+  id: Uint<128>,
+  value: Uint<128>
+): [] {
+  return MT__mint(to, id, value);
+}
+
+export circuit burn(
+  fromAddress: Either<ZswapCoinPublicKey, ContractAddress>,
+  id: Uint<128>,
+  value: Uint<128>
+): [] {
+  return MT__burn(fromAddress, id, value);
+}
+
+export circuit setURI(newURI: Opaque<"string">): [] {
+  return MT__setURI(newURI);
+}

@@ -17,7 +17,7 @@ import {
   clearScreen,
 } from '@mnf-se/common';
 
-import type { FungibleTokenProviders, DeployedFungibleTokenContract } from './types.js';
+import type { AccessControlProviders, DeployedAccessControlContract } from './types.js';
 import * as api from './api.js';
 
 const GENESIS_SEED = '0000000000000000000000000000000000000000000000000000000000000001';
@@ -83,11 +83,10 @@ function centerText(text: string, width: number): string {
 
 function renderInfo(
   contractAddress: string,
-  tokenName: string,
-  tokenSymbol: string,
-  tokenDecimals: number,
+  counterValue: bigint,
   walletAddress: string,
   nightBalance: bigint,
+  coinPubKeyHex: string,
   message?: Message,
 ): void {
   const shortAddr = contractAddress.length > 48
@@ -95,13 +94,14 @@ function renderInfo(
     : contractAddress;
 
   console.log(`    ${c.gray}Contract${c.reset}      ${shortAddr}`);
-  console.log(`    ${c.gray}Token${c.reset}         ${c.white}${c.bold}${tokenName}${c.reset} (${tokenSymbol}) - ${tokenDecimals} decimals`);
+  console.log(`    ${c.gray}Counter${c.reset}       ${c.white}${c.bold}${counterValue.toString()}${c.reset}`);
   console.log('');
 
   const shortWallet = walletAddress.length > 36
     ? walletAddress.substring(0, 36) + '...'
     : walletAddress;
   console.log(`    ${c.gray}Wallet${c.reset}        ${c.dim}${shortWallet}${c.reset}`);
+  console.log(`    ${c.gray}Coin PubKey${c.reset}   ${c.dim}${coinPubKeyHex.substring(0, 32)}...${c.reset}`);
   console.log(`    ${c.gray}NIGHT${c.reset}         ${c.white}${nightBalance.toString()}${c.reset}`);
   console.log('');
 
@@ -120,30 +120,58 @@ function renderInfo(
 function renderMenu(): void {
   console.log(`  ${c.gray}${'─'.repeat(WIDTH)}${c.reset}`);
   console.log('');
-  console.log(`    ${c.cyan}1${c.reset}  Mint tokens (to self)`);
-  console.log(`    ${c.cyan}2${c.reset}  Transfer tokens`);
-  console.log(`    ${c.cyan}3${c.reset}  View balance`);
-  console.log(`    ${c.cyan}4${c.reset}  View total supply`);
-  console.log(`    ${c.cyan}5${c.reset}  Refresh`);
-  console.log(`    ${c.cyan}6${c.reset}  Exit`);
+  console.log(`    ${c.cyan}1${c.reset}  Increment counter (requires MINTER_ROLE)`);
+  console.log(`    ${c.cyan}2${c.reset}  Grant role (admin only)`);
+  console.log(`    ${c.cyan}3${c.reset}  Revoke role (admin only)`);
+  console.log(`    ${c.cyan}4${c.reset}  Check role`);
+  console.log(`    ${c.cyan}5${c.reset}  Pause contract (requires PAUSER_ROLE)`);
+  console.log(`    ${c.cyan}6${c.reset}  Unpause contract (requires PAUSER_ROLE)`);
+  console.log(`    ${c.cyan}7${c.reset}  View counter`);
+  console.log(`    ${c.cyan}8${c.reset}  Refresh`);
+  console.log(`    ${c.cyan}9${c.reset}  Exit`);
   console.log('');
   console.log(`  ${c.gray}${'─'.repeat(WIDTH)}${c.reset}`);
   console.log('');
 }
 
+// ── Role name helpers ──────────────────────────────────────────────────
+
+function promptRoleName(): Promise<string> {
+  console.log(`    ${c.dim}Roles: MINTER, PAUSER, DEFAULT_ADMIN${c.reset}`);
+  return prompt('Role name: ');
+}
+
+function resolveRoleId(
+  roleName: string,
+  state: api.AccessControlState,
+): Uint8Array | null {
+  const upper = roleName.toUpperCase().trim();
+  switch (upper) {
+    case 'MINTER':
+    case 'MINTER_ROLE':
+      return state.minterRole;
+    case 'PAUSER':
+    case 'PAUSER_ROLE':
+      return state.pauserRole;
+    case 'DEFAULT_ADMIN':
+    case 'DEFAULT_ADMIN_ROLE':
+      return state.defaultAdminRole;
+    default:
+      return null;
+  }
+}
+
 // ── Main Interaction Loop ──────────────────────────────────────────────
 
 async function interactionLoop(
-  contract: DeployedFungibleTokenContract,
-  providers: FungibleTokenProviders,
+  contract: DeployedAccessControlContract,
+  providers: AccessControlProviders,
   walletContext: WalletContext,
   contractAddress: string,
-  tokenName: string,
-  tokenSymbol: string,
-  tokenDecimals: number,
 ): Promise<void> {
   let message: Message | undefined;
   const coinPubKey = ledger.encodeCoinPublicKey(walletContext.shieldedSecretKeys.coinPublicKey);
+  const coinPubKeyHex = Buffer.from(coinPubKey).toString('hex');
 
   while (true) {
     // Get wallet state
@@ -151,8 +179,12 @@ async function interactionLoop(
     const nightBalance = walletState.unshielded?.balances[nativeToken().raw] ?? 0n;
     const walletAddress = walletContext.unshieldedKeystore.getBech32Address().toString();
 
-    renderHeader('FUNGIBLE TOKEN', c.cyan);
-    renderInfo(contractAddress, tokenName, tokenSymbol, tokenDecimals, walletAddress, nightBalance, message);
+    // Get contract state
+    const contractState = api.getContractState(contract);
+    const counterValue = contractState?.counter ?? 0n;
+
+    renderHeader('ACCESS CONTROL VAULT', c.cyan);
+    renderInfo(contractAddress, counterValue, walletAddress, nightBalance, coinPubKeyHex, message);
     renderMenu();
     message = undefined;
 
@@ -161,58 +193,126 @@ async function interactionLoop(
     try {
       switch (choice) {
         case '1': {
-          // Mint tokens to self
-          const amountStr = await prompt('Amount to mint: ');
-          const amount = BigInt(amountStr);
-          if (amount <= 0n) {
-            message = { text: 'Amount must be positive', type: 'error' };
-            break;
-          }
-          const selfAccount = api.leftPublicKey(coinPubKey);
+          // Increment counter
           console.log(`\n    ${c.dim}Generating ZK proof and submitting transaction...${c.reset}`);
-          await api.mint(contract, selfAccount, amount);
-          message = { text: `Minted ${amount} ${tokenSymbol} to self`, type: 'success' };
+          await api.increment(contract);
+          message = { text: 'Counter incremented', type: 'success' };
           break;
         }
         case '2': {
-          // Transfer tokens
-          const toKeyHex = await prompt('Recipient public key (hex, 64 chars): ');
-          const toKeyBytes = new Uint8Array(Buffer.from(toKeyHex, 'hex'));
-          if (toKeyBytes.length !== 32) {
+          // Grant role
+          const state = api.getContractState(contract);
+          if (!state) {
+            message = { text: 'Cannot read contract state', type: 'error' };
+            break;
+          }
+          const roleName = await promptRoleName();
+          const roleId = resolveRoleId(roleName, state);
+          if (!roleId) {
+            message = { text: `Unknown role: ${roleName}`, type: 'error' };
+            break;
+          }
+          const grantKeyHex = await prompt('Recipient public key (hex, 64 chars): ');
+          const grantKeyBytes = new Uint8Array(Buffer.from(grantKeyHex, 'hex'));
+          if (grantKeyBytes.length !== 32) {
             message = { text: 'Public key must be 32 bytes (64 hex chars)', type: 'error' };
             break;
           }
-          const amountStr = await prompt('Amount to transfer: ');
-          const amount = BigInt(amountStr);
-          if (amount <= 0n) {
-            message = { text: 'Amount must be positive', type: 'error' };
-            break;
-          }
-          const toAccount = api.leftPublicKey(toKeyBytes);
+          const grantAccount = api.leftPublicKey(grantKeyBytes);
           console.log(`\n    ${c.dim}Generating ZK proof and submitting transaction...${c.reset}`);
-          await api.transfer(contract, toAccount, amount);
-          message = { text: `Transferred ${amount} ${tokenSymbol}`, type: 'success' };
+          await api.grantRole(contract, roleId, grantAccount);
+          message = { text: `Granted ${roleName.toUpperCase()} to ${grantKeyHex.substring(0, 16)}...`, type: 'success' };
           break;
         }
         case '3': {
-          // View balance
-          const selfAccount = api.leftPublicKey(coinPubKey);
-          console.log(`\n    ${c.dim}Querying balance (generates ZK proof)...${c.reset}`);
-          const result = await api.balanceOf(contract, selfAccount);
-          message = { text: `Your balance: ${c.green}${result.balance.toString()}${c.reset}`, type: 'info' };
+          // Revoke role
+          const state = api.getContractState(contract);
+          if (!state) {
+            message = { text: 'Cannot read contract state', type: 'error' };
+            break;
+          }
+          const roleName = await promptRoleName();
+          const roleId = resolveRoleId(roleName, state);
+          if (!roleId) {
+            message = { text: `Unknown role: ${roleName}`, type: 'error' };
+            break;
+          }
+          const revokeKeyHex = await prompt('Account public key (hex, 64 chars): ');
+          const revokeKeyBytes = new Uint8Array(Buffer.from(revokeKeyHex, 'hex'));
+          if (revokeKeyBytes.length !== 32) {
+            message = { text: 'Public key must be 32 bytes (64 hex chars)', type: 'error' };
+            break;
+          }
+          const revokeAccount = api.leftPublicKey(revokeKeyBytes);
+          console.log(`\n    ${c.dim}Generating ZK proof and submitting transaction...${c.reset}`);
+          await api.revokeRole(contract, roleId, revokeAccount);
+          message = { text: `Revoked ${roleName.toUpperCase()} from ${revokeKeyHex.substring(0, 16)}...`, type: 'success' };
           break;
         }
         case '4': {
-          // View total supply
-          console.log(`\n    ${c.dim}Querying total supply (generates ZK proof)...${c.reset}`);
-          const result = await api.totalSupply(contract);
-          message = { text: `Total supply: ${c.green}${result.supply.toString()}${c.reset}`, type: 'info' };
+          // Check role
+          const state = api.getContractState(contract);
+          if (!state) {
+            message = { text: 'Cannot read contract state', type: 'error' };
+            break;
+          }
+          const roleName = await promptRoleName();
+          const roleId = resolveRoleId(roleName, state);
+          if (!roleId) {
+            message = { text: `Unknown role: ${roleName}`, type: 'error' };
+            break;
+          }
+          const checkKeyHex = await prompt('Account public key (hex, 64 chars, or "self"): ');
+          let checkAccount;
+          if (checkKeyHex.toLowerCase() === 'self') {
+            checkAccount = api.leftPublicKey(coinPubKey);
+          } else {
+            const checkKeyBytes = new Uint8Array(Buffer.from(checkKeyHex, 'hex'));
+            if (checkKeyBytes.length !== 32) {
+              message = { text: 'Public key must be 32 bytes (64 hex chars)', type: 'error' };
+              break;
+            }
+            checkAccount = api.leftPublicKey(checkKeyBytes);
+          }
+          console.log(`\n    ${c.dim}Generating ZK proof and submitting transaction...${c.reset}`);
+          const { result } = await api.hasRole(contract, roleId, checkAccount);
+          const label = checkKeyHex.toLowerCase() === 'self' ? 'You' : checkKeyHex.substring(0, 16) + '...';
+          message = {
+            text: result
+              ? `${label} ${c.green}HAS${c.reset} ${roleName.toUpperCase()}`
+              : `${label} does ${c.red}NOT${c.reset} have ${roleName.toUpperCase()}`,
+            type: 'info',
+          };
           break;
         }
-        case '5':
+        case '5': {
+          // Pause
+          console.log(`\n    ${c.dim}Generating ZK proof and submitting transaction...${c.reset}`);
+          await api.pause(contract);
+          message = { text: 'Contract paused', type: 'success' };
+          break;
+        }
+        case '6': {
+          // Unpause
+          console.log(`\n    ${c.dim}Generating ZK proof and submitting transaction...${c.reset}`);
+          await api.unpause(contract);
+          message = { text: 'Contract unpaused', type: 'success' };
+          break;
+        }
+        case '7': {
+          // View counter
+          const state = api.getContractState(contract);
+          if (state) {
+            message = { text: `Counter value: ${c.green}${state.counter.toString()}${c.reset}`, type: 'info' };
+          } else {
+            message = { text: 'Cannot read contract state', type: 'error' };
+          }
+          break;
+        }
+        case '8':
           message = { text: 'Refreshed', type: 'info' };
           break;
-        case '6':
+        case '9':
           clearScreen();
           console.log(`\n  ${c.dim}Session ended.${c.reset}\n`);
           return;
@@ -235,7 +335,7 @@ export const run = async (config: Config, _logger: Logger): Promise<void> => {
   clearScreen();
   console.log('');
   console.log(`  ${c.cyan}+${'='.repeat(WIDTH - 2)}+${c.reset}`);
-  console.log(`  ${c.cyan}|${c.bold}${centerText('MIDNIGHT FUNGIBLE TOKEN', WIDTH - 2)}${c.reset}${c.cyan}|${c.reset}`);
+  console.log(`  ${c.cyan}|${c.bold}${centerText('MIDNIGHT ACCESS CONTROL', WIDTH - 2)}${c.reset}${c.cyan}|${c.reset}`);
   console.log(`  ${c.cyan}|${centerText('MNF Solutions Engineering', WIDTH - 2)}${c.cyan}|${c.reset}`);
   console.log(`  ${c.cyan}+${'='.repeat(WIDTH - 2)}+${c.reset}`);
   console.log('');
@@ -256,45 +356,25 @@ export const run = async (config: Config, _logger: Logger): Promise<void> => {
   console.log('');
   console.log(`  ${c.white}Select action:${c.reset}`);
   console.log('');
-  console.log(`    ${c.cyan}1${c.reset}  Deploy a new FungibleToken contract`);
-  console.log(`    ${c.cyan}2${c.reset}  Join an existing FungibleToken contract`);
+  console.log(`    ${c.cyan}1${c.reset}  Deploy a new AccessControl contract`);
+  console.log(`    ${c.cyan}2${c.reset}  Join an existing AccessControl contract`);
   console.log(`    ${c.cyan}3${c.reset}  Exit`);
   console.log('');
 
-  let contract: DeployedFungibleTokenContract;
+  let contract: DeployedAccessControlContract;
   let contractAddress: string;
-  let tokenName: string;
-  let tokenSymbol: string;
-  let tokenDecimals: number;
 
   while (true) {
     const choice = await promptChoice();
     switch (choice) {
       case '1': {
-        tokenName = await prompt('Token name: ');
-        if (!tokenName) {
-          console.log(`    ${c.red}Token name cannot be empty${c.reset}`);
-          continue;
-        }
-        tokenSymbol = await prompt('Token symbol: ');
-        if (!tokenSymbol) {
-          console.log(`    ${c.red}Token symbol cannot be empty${c.reset}`);
-          continue;
-        }
-        const decimalsStr = await prompt('Decimals (0-255): ');
-        tokenDecimals = parseInt(decimalsStr, 10);
-        if (isNaN(tokenDecimals) || tokenDecimals < 0 || tokenDecimals > 255) {
-          console.log(`    ${c.red}Decimals must be between 0 and 255${c.reset}`);
-          continue;
-        }
-
         console.log(`\n    ${c.dim}Deploying contract (generating ZK proof)...${c.reset}`);
-        contract = await api.deploy(providers, tokenName, tokenSymbol, BigInt(tokenDecimals));
+        contract = await api.deploy(providers);
         contractAddress = contract.deployTxData.public.contractAddress;
 
         console.log(`\n    ${c.green}${c.bold}Contract deployed!${c.reset}`);
         console.log(`    ${c.gray}Address:${c.reset}    ${contractAddress}`);
-        console.log(`    ${c.gray}Token:${c.reset}      ${tokenName} (${tokenSymbol}), ${tokenDecimals} decimals`);
+        console.log(`    ${c.gray}Admin:${c.reset}      You (deployer) have DEFAULT_ADMIN_ROLE`);
         console.log('');
         break;
       }
@@ -304,10 +384,6 @@ export const run = async (config: Config, _logger: Logger): Promise<void> => {
           console.log(`    ${c.red}Address cannot be empty${c.reset}`);
           continue;
         }
-        tokenName = await prompt('Token name (for display): ');
-        tokenSymbol = await prompt('Token symbol (for display): ');
-        const decStr = await prompt('Decimals (for display): ');
-        tokenDecimals = parseInt(decStr, 10) || 0;
 
         console.log(`\n    ${c.dim}Joining contract...${c.reset}`);
         contract = await api.joinContract(providers, addr);
@@ -336,9 +412,6 @@ export const run = async (config: Config, _logger: Logger): Promise<void> => {
     providers,
     walletContext,
     contractAddress!,
-    tokenName!,
-    tokenSymbol!,
-    tokenDecimals!,
   );
 
   try { await walletContext.wallet.stop(); } catch {}

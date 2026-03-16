@@ -17,7 +17,7 @@ import {
   clearScreen,
 } from '@mnf-se/common';
 
-import type { FungibleTokenProviders, DeployedFungibleTokenContract } from './types.js';
+import type { MultiTokenProviders, DeployedMultiTokenContract } from './types.js';
 import * as api from './api.js';
 
 const GENESIS_SEED = '0000000000000000000000000000000000000000000000000000000000000001';
@@ -83,9 +83,7 @@ function centerText(text: string, width: number): string {
 
 function renderInfo(
   contractAddress: string,
-  tokenName: string,
-  tokenSymbol: string,
-  tokenDecimals: number,
+  baseURI: string,
   walletAddress: string,
   nightBalance: bigint,
   message?: Message,
@@ -94,8 +92,12 @@ function renderInfo(
     ? contractAddress.substring(0, 48) + '...'
     : contractAddress;
 
+  const shortURI = baseURI.length > 44
+    ? baseURI.substring(0, 44) + '...'
+    : baseURI;
+
   console.log(`    ${c.gray}Contract${c.reset}      ${shortAddr}`);
-  console.log(`    ${c.gray}Token${c.reset}         ${c.white}${c.bold}${tokenName}${c.reset} (${tokenSymbol}) - ${tokenDecimals} decimals`);
+  console.log(`    ${c.gray}Base URI${c.reset}      ${c.white}${c.bold}${shortURI}${c.reset}`);
   console.log('');
 
   const shortWallet = walletAddress.length > 36
@@ -120,12 +122,14 @@ function renderInfo(
 function renderMenu(): void {
   console.log(`  ${c.gray}${'─'.repeat(WIDTH)}${c.reset}`);
   console.log('');
-  console.log(`    ${c.cyan}1${c.reset}  Mint tokens (to self)`);
+  console.log(`    ${c.cyan}1${c.reset}  Mint tokens`);
   console.log(`    ${c.cyan}2${c.reset}  Transfer tokens`);
   console.log(`    ${c.cyan}3${c.reset}  View balance`);
-  console.log(`    ${c.cyan}4${c.reset}  View total supply`);
-  console.log(`    ${c.cyan}5${c.reset}  Refresh`);
-  console.log(`    ${c.cyan}6${c.reset}  Exit`);
+  console.log(`    ${c.cyan}4${c.reset}  View URI`);
+  console.log(`    ${c.cyan}5${c.reset}  Set URI (admin)`);
+  console.log(`    ${c.cyan}6${c.reset}  Set operator approval`);
+  console.log(`    ${c.cyan}7${c.reset}  Refresh`);
+  console.log(`    ${c.cyan}8${c.reset}  Exit`);
   console.log('');
   console.log(`  ${c.gray}${'─'.repeat(WIDTH)}${c.reset}`);
   console.log('');
@@ -134,13 +138,11 @@ function renderMenu(): void {
 // ── Main Interaction Loop ──────────────────────────────────────────────
 
 async function interactionLoop(
-  contract: DeployedFungibleTokenContract,
-  providers: FungibleTokenProviders,
+  contract: DeployedMultiTokenContract,
+  providers: MultiTokenProviders,
   walletContext: WalletContext,
   contractAddress: string,
-  tokenName: string,
-  tokenSymbol: string,
-  tokenDecimals: number,
+  baseURI: string,
 ): Promise<void> {
   let message: Message | undefined;
   const coinPubKey = ledger.encodeCoinPublicKey(walletContext.shieldedSecretKeys.coinPublicKey);
@@ -151,8 +153,8 @@ async function interactionLoop(
     const nightBalance = walletState.unshielded?.balances[nativeToken().raw] ?? 0n;
     const walletAddress = walletContext.unshieldedKeystore.getBech32Address().toString();
 
-    renderHeader('FUNGIBLE TOKEN', c.cyan);
-    renderInfo(contractAddress, tokenName, tokenSymbol, tokenDecimals, walletAddress, nightBalance, message);
+    renderHeader('MULTI TOKEN (ERC1155)', c.magenta);
+    renderInfo(contractAddress, baseURI, walletAddress, nightBalance, message);
     renderMenu();
     message = undefined;
 
@@ -162,6 +164,8 @@ async function interactionLoop(
       switch (choice) {
         case '1': {
           // Mint tokens to self
+          const tokenIdStr = await prompt('Token ID: ');
+          const tokenId = BigInt(tokenIdStr);
           const amountStr = await prompt('Amount to mint: ');
           const amount = BigInt(amountStr);
           if (amount <= 0n) {
@@ -170,8 +174,8 @@ async function interactionLoop(
           }
           const selfAccount = api.leftPublicKey(coinPubKey);
           console.log(`\n    ${c.dim}Generating ZK proof and submitting transaction...${c.reset}`);
-          await api.mint(contract, selfAccount, amount);
-          message = { text: `Minted ${amount} ${tokenSymbol} to self`, type: 'success' };
+          await api.mint(contract, selfAccount, tokenId, amount);
+          message = { text: `Minted ${amount} of token #${tokenId} to self`, type: 'success' };
           break;
         }
         case '2': {
@@ -182,37 +186,74 @@ async function interactionLoop(
             message = { text: 'Public key must be 32 bytes (64 hex chars)', type: 'error' };
             break;
           }
+          const tokenIdStr = await prompt('Token ID: ');
+          const tokenId = BigInt(tokenIdStr);
           const amountStr = await prompt('Amount to transfer: ');
           const amount = BigInt(amountStr);
           if (amount <= 0n) {
             message = { text: 'Amount must be positive', type: 'error' };
             break;
           }
+          const fromAccount = api.leftPublicKey(coinPubKey);
           const toAccount = api.leftPublicKey(toKeyBytes);
           console.log(`\n    ${c.dim}Generating ZK proof and submitting transaction...${c.reset}`);
-          await api.transfer(contract, toAccount, amount);
-          message = { text: `Transferred ${amount} ${tokenSymbol}`, type: 'success' };
+          await api.transferFrom(contract, fromAccount, toAccount, tokenId, amount);
+          message = { text: `Transferred ${amount} of token #${tokenId}`, type: 'success' };
           break;
         }
         case '3': {
           // View balance
+          const tokenIdStr = await prompt('Token ID: ');
+          const tokenId = BigInt(tokenIdStr);
           const selfAccount = api.leftPublicKey(coinPubKey);
           console.log(`\n    ${c.dim}Querying balance (generates ZK proof)...${c.reset}`);
-          const result = await api.balanceOf(contract, selfAccount);
-          message = { text: `Your balance: ${c.green}${result.balance.toString()}${c.reset}`, type: 'info' };
+          const result = await api.balanceOf(contract, selfAccount, tokenId);
+          message = { text: `Token #${tokenId} balance: ${c.green}${result.balance.toString()}${c.reset}`, type: 'info' };
           break;
         }
         case '4': {
-          // View total supply
-          console.log(`\n    ${c.dim}Querying total supply (generates ZK proof)...${c.reset}`);
-          const result = await api.totalSupply(contract);
-          message = { text: `Total supply: ${c.green}${result.supply.toString()}${c.reset}`, type: 'info' };
+          // View URI
+          const tokenIdStr = await prompt('Token ID (any value, URI is shared): ');
+          const tokenId = BigInt(tokenIdStr);
+          console.log(`\n    ${c.dim}Querying URI (generates ZK proof)...${c.reset}`);
+          const result = await api.uri(contract, tokenId);
+          baseURI = result.uri;
+          message = { text: `Base URI: ${c.green}${result.uri}${c.reset}`, type: 'info' };
           break;
         }
-        case '5':
+        case '5': {
+          // Set URI (admin)
+          const newURI = await prompt('New base URI: ');
+          if (!newURI) {
+            message = { text: 'URI cannot be empty', type: 'error' };
+            break;
+          }
+          console.log(`\n    ${c.dim}Generating ZK proof and submitting transaction...${c.reset}`);
+          await api.setURI(contract, newURI);
+          baseURI = newURI;
+          message = { text: `URI updated to: ${newURI}`, type: 'success' };
+          break;
+        }
+        case '6': {
+          // Set operator approval
+          const operatorHex = await prompt('Operator public key (hex, 64 chars): ');
+          const operatorBytes = new Uint8Array(Buffer.from(operatorHex, 'hex'));
+          if (operatorBytes.length !== 32) {
+            message = { text: 'Public key must be 32 bytes (64 hex chars)', type: 'error' };
+            break;
+          }
+          const approvedStr = await prompt('Approve? (yes/no): ');
+          const approved = approvedStr.toLowerCase() === 'yes' || approvedStr.toLowerCase() === 'y';
+          const operatorAccount = api.leftPublicKey(operatorBytes);
+          console.log(`\n    ${c.dim}Generating ZK proof and submitting transaction...${c.reset}`);
+          await api.setApprovalForAll(contract, operatorAccount, approved);
+          message = { text: `Operator approval set to ${approved}`, type: 'success' };
+          break;
+        }
+        case '7':
           message = { text: 'Refreshed', type: 'info' };
           break;
-        case '6':
+        case '8':
           clearScreen();
           console.log(`\n  ${c.dim}Session ended.${c.reset}\n`);
           return;
@@ -234,10 +275,10 @@ export const run = async (config: Config, _logger: Logger): Promise<void> => {
 
   clearScreen();
   console.log('');
-  console.log(`  ${c.cyan}+${'='.repeat(WIDTH - 2)}+${c.reset}`);
-  console.log(`  ${c.cyan}|${c.bold}${centerText('MIDNIGHT FUNGIBLE TOKEN', WIDTH - 2)}${c.reset}${c.cyan}|${c.reset}`);
-  console.log(`  ${c.cyan}|${centerText('MNF Solutions Engineering', WIDTH - 2)}${c.cyan}|${c.reset}`);
-  console.log(`  ${c.cyan}+${'='.repeat(WIDTH - 2)}+${c.reset}`);
+  console.log(`  ${c.magenta}+${'='.repeat(WIDTH - 2)}+${c.reset}`);
+  console.log(`  ${c.magenta}|${c.bold}${centerText('MIDNIGHT MULTI TOKEN', WIDTH - 2)}${c.reset}${c.magenta}|${c.reset}`);
+  console.log(`  ${c.magenta}|${centerText('MNF Solutions Engineering', WIDTH - 2)}${c.magenta}|${c.reset}`);
+  console.log(`  ${c.magenta}+${'='.repeat(WIDTH - 2)}+${c.reset}`);
   console.log('');
 
   const walletContext = await setupWallet(config);
@@ -256,45 +297,32 @@ export const run = async (config: Config, _logger: Logger): Promise<void> => {
   console.log('');
   console.log(`  ${c.white}Select action:${c.reset}`);
   console.log('');
-  console.log(`    ${c.cyan}1${c.reset}  Deploy a new FungibleToken contract`);
-  console.log(`    ${c.cyan}2${c.reset}  Join an existing FungibleToken contract`);
+  console.log(`    ${c.cyan}1${c.reset}  Deploy a new MultiToken contract`);
+  console.log(`    ${c.cyan}2${c.reset}  Join an existing MultiToken contract`);
   console.log(`    ${c.cyan}3${c.reset}  Exit`);
   console.log('');
 
-  let contract: DeployedFungibleTokenContract;
+  let contract: DeployedMultiTokenContract;
   let contractAddress: string;
-  let tokenName: string;
-  let tokenSymbol: string;
-  let tokenDecimals: number;
+  let baseURI: string;
 
   while (true) {
     const choice = await promptChoice();
     switch (choice) {
       case '1': {
-        tokenName = await prompt('Token name: ');
-        if (!tokenName) {
-          console.log(`    ${c.red}Token name cannot be empty${c.reset}`);
-          continue;
-        }
-        tokenSymbol = await prompt('Token symbol: ');
-        if (!tokenSymbol) {
-          console.log(`    ${c.red}Token symbol cannot be empty${c.reset}`);
-          continue;
-        }
-        const decimalsStr = await prompt('Decimals (0-255): ');
-        tokenDecimals = parseInt(decimalsStr, 10);
-        if (isNaN(tokenDecimals) || tokenDecimals < 0 || tokenDecimals > 255) {
-          console.log(`    ${c.red}Decimals must be between 0 and 255${c.reset}`);
+        baseURI = await prompt('Base URI (e.g. https://tokens.example.com/{id}.json): ');
+        if (!baseURI) {
+          console.log(`    ${c.red}URI cannot be empty${c.reset}`);
           continue;
         }
 
         console.log(`\n    ${c.dim}Deploying contract (generating ZK proof)...${c.reset}`);
-        contract = await api.deploy(providers, tokenName, tokenSymbol, BigInt(tokenDecimals));
+        contract = await api.deploy(providers, baseURI);
         contractAddress = contract.deployTxData.public.contractAddress;
 
         console.log(`\n    ${c.green}${c.bold}Contract deployed!${c.reset}`);
         console.log(`    ${c.gray}Address:${c.reset}    ${contractAddress}`);
-        console.log(`    ${c.gray}Token:${c.reset}      ${tokenName} (${tokenSymbol}), ${tokenDecimals} decimals`);
+        console.log(`    ${c.gray}Base URI:${c.reset}   ${baseURI}`);
         console.log('');
         break;
       }
@@ -304,10 +332,7 @@ export const run = async (config: Config, _logger: Logger): Promise<void> => {
           console.log(`    ${c.red}Address cannot be empty${c.reset}`);
           continue;
         }
-        tokenName = await prompt('Token name (for display): ');
-        tokenSymbol = await prompt('Token symbol (for display): ');
-        const decStr = await prompt('Decimals (for display): ');
-        tokenDecimals = parseInt(decStr, 10) || 0;
+        baseURI = await prompt('Base URI (for display, or leave blank): ') || '(unknown)';
 
         console.log(`\n    ${c.dim}Joining contract...${c.reset}`);
         contract = await api.joinContract(providers, addr);
@@ -336,9 +361,7 @@ export const run = async (config: Config, _logger: Logger): Promise<void> => {
     providers,
     walletContext,
     contractAddress!,
-    tokenName!,
-    tokenSymbol!,
-    tokenDecimals!,
+    baseURI!,
   );
 
   try { await walletContext.wallet.stop(); } catch {}

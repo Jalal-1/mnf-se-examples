@@ -1,0 +1,79 @@
+pragma language_version >= 0.21.0;
+
+import CompactStandardLibrary;
+import "../../../../contracts/access/AccessControl" prefix AC_;
+import "../../../../contracts/security/Pausable" prefix P_;
+import "../../../../contracts/security/Initializable" prefix I_;
+
+export { ZswapCoinPublicKey, ContractAddress, Either };
+
+// ── Role identifiers (sealed = hidden from public ledger) ────────────
+
+export sealed ledger MINTER_ROLE: Bytes<32>;
+export sealed ledger PAUSER_ROLE: Bytes<32>;
+
+// ── Application state ────────────────────────────────────────────────
+
+export ledger counter: Counter;
+
+// ── Constructor ──────────────────────────────────────────────────────
+
+constructor() {
+  // Compute deterministic role IDs
+  MINTER_ROLE = persistentHash<Bytes<32>>(pad(32, "MINTER_ROLE"));
+  PAUSER_ROLE = persistentHash<Bytes<32>>(pad(32, "PAUSER_ROLE"));
+
+  // Grant DEFAULT_ADMIN_ROLE to the deployer
+  AC__grantRole(
+    AC_DEFAULT_ADMIN_ROLE,
+    left<ZswapCoinPublicKey, ContractAddress>(ownPublicKey())
+  );
+}
+
+// ── Gated operations ─────────────────────────────────────────────────
+
+export circuit increment(): [] {
+  AC_assertOnlyRole(MINTER_ROLE);
+  P_assertNotPaused();
+  counter.increment(1);
+}
+
+export circuit pause(): [] {
+  AC_assertOnlyRole(PAUSER_ROLE);
+  P__pause();
+}
+
+export circuit unpause(): [] {
+  AC_assertOnlyRole(PAUSER_ROLE);
+  P__unpause();
+}
+
+// ── Re-exported AccessControl circuits ───────────────────────────────
+
+export circuit grantRole(
+  roleId: Bytes<32>,
+  account: Either<ZswapCoinPublicKey, ContractAddress>
+): [] {
+  AC_grantRole(roleId, account);
+}
+
+export circuit revokeRole(
+  roleId: Bytes<32>,
+  account: Either<ZswapCoinPublicKey, ContractAddress>
+): [] {
+  AC_revokeRole(roleId, account);
+}
+
+export circuit hasRole(
+  roleId: Bytes<32>,
+  account: Either<ZswapCoinPublicKey, ContractAddress>
+): Boolean {
+  return AC_hasRole(roleId, account);
+}
+
+export circuit renounceRole(
+  roleId: Bytes<32>,
+  callerConfirmation: Either<ZswapCoinPublicKey, ContractAddress>
+): [] {
+  AC_renounceRole(roleId, callerConfirmation);
+}
