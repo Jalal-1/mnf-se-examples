@@ -26,19 +26,57 @@ git clone https://github.com/Jalal-1/mnf-se-examples.git
 cd mnf-se-examples
 npm install
 
-# Start local testnet (node + indexer + proof server)
-docker compose -f docker/standalone.yml up -d
+# Build all contracts (first time only)
+npm run build:all
 
-# Compile and run any app (e.g. counter)
-cd apps/counter/contract && npm run compact && npm run build && cd ../../..
-npm -w @mnf-se/counter-cli run standalone
+# Start local testnet (node + indexer + proof server)
+npm run docker:up
+
+# Run any app
+npm run counter
+npm run token
+npm run election
 ```
+
+## Commands
+
+### Run Apps
+
+| Command | Description |
+|---------|-------------|
+| `npm run counter` | Run counter on local testnet |
+| `npm run token` | Run token on local testnet |
+| `npm run election` | Run election on local testnet |
+| `npm run counter:preview` | Run counter on preview network |
+| `npm run token:preview` | Run token on preview network |
+| `npm run election:preview` | Run election on preview network |
+
+### Docker (Local Testnet)
+
+| Command | Description |
+|---------|-------------|
+| `npm run docker:up` | Start local testnet (node + indexer + proof server) |
+| `npm run docker:down` | Stop local testnet |
+| `npm run docker:logs` | Tail container logs |
+| `npm run docker:reset` | Wipe all state and restart fresh |
+
+### Build
+
+| Command | Description |
+|---------|-------------|
+| `npm run build:all` | Compile all Compact contracts + TypeScript |
+| `npm run build:counter` | Compile counter contract only |
+| `npm run build:token` | Compile token contract only |
+| `npm run build:election` | Compile election contract only |
+| `npm run typecheck` | Type-check all CLI code |
+
+### Preview Network
 
 For preview/preprod, only the proof server is needed locally:
 
 ```bash
 docker compose -f docker/proof-server.yml up -d
-npm -w @mnf-se/counter-cli run preview
+npm run counter:preview
 ```
 
 Fund your wallet from the [Preview faucet](https://faucet.preview.midnight.network).

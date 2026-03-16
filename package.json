@@ -35,7 +35,22 @@
     "ws": "^8.19.0"
   },
   "scripts": {
-    "postinstall": "npx patch-package"
+    "postinstall": "npx patch-package",
+    "docker:up": "docker compose -f docker/standalone.yml up -d",
+    "docker:down": "docker compose -f docker/standalone.yml down",
+    "docker:logs": "docker compose -f docker/standalone.yml logs -f",
+    "docker:reset": "docker compose -f docker/standalone.yml down -v && docker compose -f docker/standalone.yml up -d",
+    "counter": "npm -w @mnf-se/counter-cli run standalone",
+    "token": "npm -w @mnf-se/token-cli run standalone",
+    "election": "npm -w @mnf-se/election-cli run standalone",
+    "counter:preview": "npm -w @mnf-se/counter-cli run preview",
+    "token:preview": "npm -w @mnf-se/token-cli run preview",
+    "election:preview": "npm -w @mnf-se/election-cli run preview",
+    "build:counter": "cd apps/counter/contract && npm run compact && npm run build",
+    "build:token": "cd apps/token/contract && npm run compact && npm run build",
+    "build:election": "cd apps/election/contract && npm run compact && npm run build",
+    "build:all": "npm run build:counter && npm run build:token && npm run build:election",
+    "typecheck": "npx tsc -p apps/counter/cli/tsconfig.json --noEmit && npx tsc -p apps/token/cli/tsconfig.json --noEmit && npx tsc -p apps/election/cli/tsconfig.json --noEmit"
   },
   "devDependencies": {
     "@types/node": "^25.3.2",
