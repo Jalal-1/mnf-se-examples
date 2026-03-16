@@ -43,14 +43,20 @@
     "counter": "npm -w @mnf-se/counter-cli run standalone",
     "token": "npm -w @mnf-se/token-cli run standalone",
     "election": "npm -w @mnf-se/election-cli run standalone",
+    "fungible-token": "npm -w @mnf-se/fungible-token-cli run standalone",
+    "nft": "npm -w @mnf-se/nft-cli run standalone",
     "counter:preview": "npm -w @mnf-se/counter-cli run preview",
     "token:preview": "npm -w @mnf-se/token-cli run preview",
     "election:preview": "npm -w @mnf-se/election-cli run preview",
+    "fungible-token:preview": "npm -w @mnf-se/fungible-token-cli run preview",
+    "nft:preview": "npm -w @mnf-se/nft-cli run preview",
     "build:counter": "cd apps/counter/contract && npm run compact && npm run build",
     "build:token": "cd apps/token/contract && npm run compact && npm run build",
     "build:election": "cd apps/election/contract && npm run compact && npm run build",
-    "build:all": "npm run build:counter && npm run build:token && npm run build:election",
-    "typecheck": "npx tsc -p apps/counter/cli/tsconfig.json --noEmit && npx tsc -p apps/token/cli/tsconfig.json --noEmit && npx tsc -p apps/election/cli/tsconfig.json --noEmit"
+    "build:fungible-token": "cd apps/fungible-token/contract && npm run compact && npm run build",
+    "build:nft": "cd apps/nft/contract && npm run compact && npm run build",
+    "build:all": "npm run build:counter && npm run build:token && npm run build:election && npm run build:fungible-token && npm run build:nft",
+    "typecheck": "npx tsc -p apps/counter/cli/tsconfig.json --noEmit && npx tsc -p apps/token/cli/tsconfig.json --noEmit && npx tsc -p apps/election/cli/tsconfig.json --noEmit && npx tsc -p apps/fungible-token/cli/tsconfig.json --noEmit && npx tsc -p apps/nft/cli/tsconfig.json --noEmit"
   },
   "devDependencies": {
     "@types/node": "^25.3.2",

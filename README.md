@@ -11,6 +11,8 @@ Deployable apps and an AI coding knowledge base for building Midnight DApps.
 | [**counter**](apps/counter/) | Simple on-chain counter | Public state, basic circuit | Working |
 | [**token**](apps/token/) | Shielded & unshielded token minting | Zswap, `mintShieldedToken`, access control, witnesses | Shielded working, unshielded pending node fix (error 139) |
 | [**election**](apps/election/) | Privacy-preserving commit-reveal voting | MerkleTree state, nullifiers, commit-reveal, multi-party | Working |
+| [**fungible-token**](apps/fungible-token/) | ERC20-like fungible token | OZ FungibleToken, Map balances, transfer, approve, allowance | New |
+| [**nft**](apps/nft/) | ERC721-like non-fungible token | OZ NonFungibleToken, ownership, tokenURI, approvals | New |
 
 ## Prerequisites
 
@@ -45,11 +47,15 @@ npm run election
 | Command | Description |
 |---------|-------------|
 | `npm run counter` | Run counter on local testnet |
-| `npm run token` | Run token on local testnet |
+| `npm run token` | Run shielded token on local testnet |
 | `npm run election` | Run election on local testnet |
+| `npm run fungible-token` | Run fungible token (ERC20) on local testnet |
+| `npm run nft` | Run NFT (ERC721) on local testnet |
 | `npm run counter:preview` | Run counter on preview network |
-| `npm run token:preview` | Run token on preview network |
+| `npm run token:preview` | Run shielded token on preview network |
 | `npm run election:preview` | Run election on preview network |
+| `npm run fungible-token:preview` | Run fungible token on preview network |
+| `npm run nft:preview` | Run NFT on preview network |
 
 ### Docker (Local Testnet)
 
@@ -66,8 +72,10 @@ npm run election
 |---------|-------------|
 | `npm run build:all` | Compile all Compact contracts + TypeScript |
 | `npm run build:counter` | Compile counter contract only |
-| `npm run build:token` | Compile token contract only |
+| `npm run build:token` | Compile shielded token contract only |
 | `npm run build:election` | Compile election contract only |
+| `npm run build:fungible-token` | Compile fungible token contract only |
+| `npm run build:nft` | Compile NFT contract only |
 | `npm run typecheck` | Type-check all CLI code |
 
 ### Preview Network
@@ -106,15 +114,16 @@ See each app's README for app-specific setup and walkthrough instructions.
 ```
 mnf-se-examples/
 ├── packages/common/        # @mnf-se/common — shared wallet, providers, display
+├── contracts/              # Shared OZ-style Compact library
+│   ├── token/              # FungibleToken, NonFungibleToken, MultiToken
+│   ├── security/           # Initializable, Pausable
+│   ├── access/             # Ownable
+│   └── utils/              # Utils (zero address checks, etc.)
 ├── apps/counter/           # Simple counter DApp
-│   ├── contract/           # Compact contract + TypeScript bindings
-│   └── cli/                # Interactive CLI
-├── apps/token/             # Shielded & unshielded token DApp
-│   ├── contract/           # Token contract (mint, burn, get_total_supply)
-│   └── cli/                # Authority/user CLI with ANSI dashboard
-├── apps/election/          # Privacy-preserving election DApp
-│   ├── contract/           # Election contract (commit-reveal, MerkleTree)
-│   └── cli/                # Authority/voter CLI
+├── apps/token/             # Shielded token (Zswap mintShieldedToken)
+├── apps/fungible-token/    # ERC20-like fungible token (OZ FungibleToken)
+├── apps/nft/               # ERC721-like NFT (OZ NonFungibleToken)
+├── apps/election/          # Privacy-preserving election (commit-reveal)
 ├── docker/                 # Docker Compose files
 │   ├── proof-server.yml    # Proof server only (for preview/preprod)
 │   ├── standalone.yml      # Full local stack (node + indexer + proof server)

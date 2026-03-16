@@ -1,0 +1,17 @@
+{
+  "name": "@mnf-se/nft-cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "preview": "node --experimental-specifier-resolution=node --loader ts-node/esm src/main.ts -- --network preview",
+    "preprod": "node --experimental-specifier-resolution=node --loader ts-node/esm src/main.ts -- --network preprod",
+    "standalone": "node --experimental-specifier-resolution=node --loader ts-node/esm src/main.ts -- --network standalone",
+    "build": "rm -rf dist && tsc --project tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@mnf-se/common": "*",
+    "@mnf-se/nft-contract": "*"
+  }
+}

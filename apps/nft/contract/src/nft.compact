@@ -1,0 +1,87 @@
+pragma language_version >= 0.20;
+
+import CompactStandardLibrary;
+import "../../../../contracts/token/NonFungibleToken" prefix NFT_;
+
+export { ZswapCoinPublicKey, ContractAddress, Either };
+
+constructor(
+  name_: Opaque<"string">,
+  symbol_: Opaque<"string">
+) {
+  NFT_initialize(name_, symbol_);
+}
+
+// ── Read operations ──────────────────────────────────────────
+
+export circuit name(): Opaque<"string"> {
+  return NFT_name();
+}
+
+export circuit symbol(): Opaque<"string"> {
+  return NFT_symbol();
+}
+
+export circuit balanceOf(account: Either<ZswapCoinPublicKey, ContractAddress>): Uint<128> {
+  return NFT_balanceOf(account);
+}
+
+export circuit ownerOf(tokenId: Uint<128>): Either<ZswapCoinPublicKey, ContractAddress> {
+  return NFT_ownerOf(tokenId);
+}
+
+export circuit tokenURI(tokenId: Uint<128>): Opaque<"string"> {
+  return NFT_tokenURI(tokenId);
+}
+
+export circuit getApproved(tokenId: Uint<128>): Either<ZswapCoinPublicKey, ContractAddress> {
+  return NFT_getApproved(tokenId);
+}
+
+export circuit isApprovedForAll(
+  owner: Either<ZswapCoinPublicKey, ContractAddress>,
+  operator: Either<ZswapCoinPublicKey, ContractAddress>
+): Boolean {
+  return NFT_isApprovedForAll(owner, operator);
+}
+
+// ── Write operations ─────────────────────────────────────────
+
+export circuit approve(
+  to: Either<ZswapCoinPublicKey, ContractAddress>,
+  tokenId: Uint<128>
+): [] {
+  return NFT_approve(to, tokenId);
+}
+
+export circuit setApprovalForAll(
+  operator: Either<ZswapCoinPublicKey, ContractAddress>,
+  approved: Boolean
+): [] {
+  return NFT_setApprovalForAll(operator, approved);
+}
+
+export circuit transferFrom(
+  fromAddress: Either<ZswapCoinPublicKey, ContractAddress>,
+  to: Either<ZswapCoinPublicKey, ContractAddress>,
+  tokenId: Uint<128>
+): [] {
+  return NFT_transferFrom(fromAddress, to, tokenId);
+}
+
+// ── Admin operations (exposed for demo, restrict in production) ──
+
+export circuit mint(
+  to: Either<ZswapCoinPublicKey, ContractAddress>,
+  tokenId: Uint<128>
+): [] {
+  return NFT__mint(to, tokenId);
+}
+
+export circuit setTokenURI(tokenId: Uint<128>, uri: Opaque<"string">): [] {
+  return NFT__setTokenURI(tokenId, uri);
+}
+
+export circuit burn(tokenId: Uint<128>): [] {
+  return NFT__burn(tokenId);
+}

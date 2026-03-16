@@ -1,0 +1,83 @@
+pragma language_version >= 0.20;
+
+import CompactStandardLibrary;
+import "../../../../contracts/token/FungibleToken" prefix FT_;
+
+export { ZswapCoinPublicKey, ContractAddress, Either };
+
+constructor(
+  name_: Opaque<"string">,
+  symbol_: Opaque<"string">,
+  decimals_: Uint<8>
+) {
+  FT_initialize(name_, symbol_, decimals_);
+}
+
+// ── Read operations ──────────────────────────────────────────
+
+export circuit name(): Opaque<"string"> {
+  return FT_name();
+}
+
+export circuit symbol(): Opaque<"string"> {
+  return FT_symbol();
+}
+
+export circuit decimals(): Uint<8> {
+  return FT_decimals();
+}
+
+export circuit totalSupply(): Uint<128> {
+  return FT_totalSupply();
+}
+
+export circuit balanceOf(account: Either<ZswapCoinPublicKey, ContractAddress>): Uint<128> {
+  return FT_balanceOf(account);
+}
+
+export circuit allowance(
+  owner: Either<ZswapCoinPublicKey, ContractAddress>,
+  spender: Either<ZswapCoinPublicKey, ContractAddress>
+): Uint<128> {
+  return FT_allowance(owner, spender);
+}
+
+// ── Write operations ─────────────────────────────────────────
+
+export circuit transfer(
+  to: Either<ZswapCoinPublicKey, ContractAddress>,
+  value: Uint<128>
+): Boolean {
+  return FT_transfer(to, value);
+}
+
+export circuit approve(
+  spender: Either<ZswapCoinPublicKey, ContractAddress>,
+  value: Uint<128>
+): Boolean {
+  return FT_approve(spender, value);
+}
+
+export circuit transferFrom(
+  fromAddress: Either<ZswapCoinPublicKey, ContractAddress>,
+  to: Either<ZswapCoinPublicKey, ContractAddress>,
+  value: Uint<128>
+): Boolean {
+  return FT_transferFrom(fromAddress, to, value);
+}
+
+// ── Admin operations (exposed for demo, restrict in production) ──
+
+export circuit mint(
+  account: Either<ZswapCoinPublicKey, ContractAddress>,
+  value: Uint<128>
+): [] {
+  return FT__mint(account, value);
+}
+
+export circuit burn(
+  account: Either<ZswapCoinPublicKey, ContractAddress>,
+  value: Uint<128>
+): [] {
+  return FT__burn(account, value);
+}
