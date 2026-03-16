@@ -1,8 +1,8 @@
 # MNF Solutions Engineering Examples
 
-A growing collection of mini example applications on the [Midnight Network](https://midnight.network/), built by the MNF Solutions Engineering team.
+A collection of mini example applications on the [Midnight Network](https://midnight.network/).
 
-Serves as both **deployable apps** and an **AI coding knowledge base** for building Midnight DApps.
+Deployable apps and an AI coding knowledge base for building Midnight DApps.
 
 ## Apps
 
