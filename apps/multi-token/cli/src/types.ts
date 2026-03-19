@@ -1,9 +1,9 @@
 import { MultiToken, type MultiTokenPrivateState } from '@mnf-se/multi-token-contract';
 import type { MidnightProviders } from '@midnight-ntwrk/midnight-js-types';
 import type { DeployedContract, FoundContract } from '@midnight-ntwrk/midnight-js-contracts';
-import type { ImpureCircuitId } from '@midnight-ntwrk/compact-js';
+import type { ProvableCircuitId } from '@midnight-ntwrk/compact-js';
 
-export type MultiTokenCircuits = ImpureCircuitId<MultiToken.Contract<MultiTokenPrivateState>>;
+export type MultiTokenCircuits = ProvableCircuitId<MultiToken.Contract<MultiTokenPrivateState>>;
 
 export const MultiTokenPrivateStateId = 'multiTokenPrivateState';
 

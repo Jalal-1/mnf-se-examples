@@ -1,7 +1,7 @@
 import { stdin as input, stdout as output } from 'node:process';
 import { createInterface } from 'node:readline/promises';
-import * as ledger from '@midnight-ntwrk/ledger-v7';
-import { nativeToken } from '@midnight-ntwrk/ledger-v7';
+import * as ledger from '@midnight-ntwrk/ledger-v8';
+import { nativeToken } from '@midnight-ntwrk/ledger-v8';
 import * as Rx from 'rxjs';
 import { Buffer } from 'buffer';
 import { type Logger } from 'pino';
@@ -101,7 +101,7 @@ function renderInfo(
     ? walletAddress.substring(0, 36) + '...'
     : walletAddress;
   console.log(`    ${c.gray}Wallet${c.reset}        ${c.dim}${shortWallet}${c.reset}`);
-  console.log(`    ${c.gray}Coin PubKey${c.reset}   ${c.dim}${coinPubKeyHex.substring(0, 32)}...${c.reset}`);
+  console.log(`    ${c.gray}Coin PubKey${c.reset}   ${c.dim}${coinPubKeyHex}${c.reset}`);
   console.log(`    ${c.gray}NIGHT${c.reset}         ${c.white}${nightBalance.toString()}${c.reset}`);
   console.log('');
 
@@ -179,8 +179,8 @@ async function interactionLoop(
     const nightBalance = walletState.unshielded?.balances[nativeToken().raw] ?? 0n;
     const walletAddress = walletContext.unshieldedKeystore.getBech32Address().toString();
 
-    // Get contract state
-    const contractState = api.getContractState(contract);
+    // Get contract state (queries indexer for latest on-chain state)
+    const contractState = await api.getContractState(providers, contractAddress);
     const counterValue = contractState?.counter ?? 0n;
 
     renderHeader('ACCESS CONTROL VAULT', c.cyan);
@@ -201,7 +201,7 @@ async function interactionLoop(
         }
         case '2': {
           // Grant role
-          const state = api.getContractState(contract);
+          const state = await api.getContractState(providers, contractAddress);
           if (!state) {
             message = { text: 'Cannot read contract state', type: 'error' };
             break;
@@ -212,13 +212,18 @@ async function interactionLoop(
             message = { text: `Unknown role: ${roleName}`, type: 'error' };
             break;
           }
-          const grantKeyHex = await prompt('Recipient public key (hex, 64 chars): ');
-          const grantKeyBytes = new Uint8Array(Buffer.from(grantKeyHex, 'hex'));
-          if (grantKeyBytes.length !== 32) {
-            message = { text: 'Public key must be 32 bytes (64 hex chars)', type: 'error' };
-            break;
+          const grantKeyHex = await prompt('Recipient public key (hex, or "self"): ');
+          let grantAccount;
+          if (grantKeyHex.toLowerCase() === 'self') {
+            grantAccount = api.leftPublicKey(coinPubKey);
+          } else {
+            const grantKeyBytes = new Uint8Array(Buffer.from(grantKeyHex, 'hex'));
+            if (grantKeyBytes.length !== 32) {
+              message = { text: 'Public key must be 32 bytes (64 hex chars)', type: 'error' };
+              break;
+            }
+            grantAccount = api.leftPublicKey(grantKeyBytes);
           }
-          const grantAccount = api.leftPublicKey(grantKeyBytes);
           console.log(`\n    ${c.dim}Generating ZK proof and submitting transaction...${c.reset}`);
           await api.grantRole(contract, roleId, grantAccount);
           message = { text: `Granted ${roleName.toUpperCase()} to ${grantKeyHex.substring(0, 16)}...`, type: 'success' };
@@ -226,7 +231,7 @@ async function interactionLoop(
         }
         case '3': {
           // Revoke role
-          const state = api.getContractState(contract);
+          const state = await api.getContractState(providers, contractAddress);
           if (!state) {
             message = { text: 'Cannot read contract state', type: 'error' };
             break;
@@ -237,13 +242,18 @@ async function interactionLoop(
             message = { text: `Unknown role: ${roleName}`, type: 'error' };
             break;
           }
-          const revokeKeyHex = await prompt('Account public key (hex, 64 chars): ');
-          const revokeKeyBytes = new Uint8Array(Buffer.from(revokeKeyHex, 'hex'));
-          if (revokeKeyBytes.length !== 32) {
-            message = { text: 'Public key must be 32 bytes (64 hex chars)', type: 'error' };
-            break;
+          const revokeKeyHex = await prompt('Account public key (hex, or "self"): ');
+          let revokeAccount;
+          if (revokeKeyHex.toLowerCase() === 'self') {
+            revokeAccount = api.leftPublicKey(coinPubKey);
+          } else {
+            const revokeKeyBytes = new Uint8Array(Buffer.from(revokeKeyHex, 'hex'));
+            if (revokeKeyBytes.length !== 32) {
+              message = { text: 'Public key must be 32 bytes (64 hex chars)', type: 'error' };
+              break;
+            }
+            revokeAccount = api.leftPublicKey(revokeKeyBytes);
           }
-          const revokeAccount = api.leftPublicKey(revokeKeyBytes);
           console.log(`\n    ${c.dim}Generating ZK proof and submitting transaction...${c.reset}`);
           await api.revokeRole(contract, roleId, revokeAccount);
           message = { text: `Revoked ${roleName.toUpperCase()} from ${revokeKeyHex.substring(0, 16)}...`, type: 'success' };
@@ -251,7 +261,7 @@ async function interactionLoop(
         }
         case '4': {
           // Check role
-          const state = api.getContractState(contract);
+          const state = await api.getContractState(providers, contractAddress);
           if (!state) {
             message = { text: 'Cannot read contract state', type: 'error' };
             break;
@@ -301,7 +311,7 @@ async function interactionLoop(
         }
         case '7': {
           // View counter
-          const state = api.getContractState(contract);
+          const state = await api.getContractState(providers, contractAddress);
           if (state) {
             message = { text: `Counter value: ${c.green}${state.counter.toString()}${c.reset}`, type: 'info' };
           } else {
@@ -347,7 +357,7 @@ export const run = async (config: Config, _logger: Logger): Promise<void> => {
   const coinPubKeyHex = Buffer.from(
     ledger.encodeCoinPublicKey(walletContext.shieldedSecretKeys.coinPublicKey),
   ).toString('hex');
-  console.log(`    ${c.gray}Coin PubKey:${c.reset} ${coinPubKeyHex.substring(0, 32)}...`);
+  console.log(`    ${c.gray}Coin PubKey:${c.reset} ${coinPubKeyHex}`);
   console.log('');
 
   const providers = await withStatus('Configuring providers', () => api.configureProviders(walletContext, config));

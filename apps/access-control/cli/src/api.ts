@@ -1,6 +1,6 @@
 import { type ContractAddress } from '@midnight-ntwrk/compact-runtime';
 import { AccessControl, type AccessControlPrivateState } from '@mnf-se/access-control-contract';
-import * as ledger from '@midnight-ntwrk/ledger-v7';
+import * as ledger from '@midnight-ntwrk/ledger-v8';
 import { CompiledContract } from '@midnight-ntwrk/compact-js';
 import { deployContract, findDeployedContract } from '@midnight-ntwrk/midnight-js-contracts';
 import { httpClientProofProvider } from '@midnight-ntwrk/midnight-js-http-client-proof-provider';
@@ -8,6 +8,7 @@ import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-p
 import { levelPrivateStateProvider } from '@midnight-ntwrk/midnight-js-level-private-state-provider';
 import { NodeZkConfigProvider } from '@midnight-ntwrk/midnight-js-node-zk-config-provider';
 import type { FinalizedTxData } from '@midnight-ntwrk/midnight-js-types';
+import { assertIsContractAddress } from '@midnight-ntwrk/midnight-js-utils';
 import { type Logger } from 'pino';
 import path from 'node:path';
 import { WebSocket } from 'ws';
@@ -183,12 +184,13 @@ export type AccessControlState = {
 // DEFAULT_ADMIN_ROLE is Bytes<32> of all zeros (the default value in AccessControl module)
 const DEFAULT_ADMIN_ROLE_BYTES = new Uint8Array(32);
 
-export const getContractState = (
-  contract: DeployedAccessControlContract,
-): AccessControlState | null => {
+export const getContractState = async (
+  providers: AccessControlProviders,
+  contractAddress: string,
+): Promise<AccessControlState | null> => {
   try {
-    const contractState = (contract as any).deployTxData?.public?.initialContractState
-      ?? (contract as any).contractState;
+    assertIsContractAddress(contractAddress);
+    const contractState = await providers.publicDataProvider.queryContractState(contractAddress);
     if (!contractState?.data) return null;
     const ledgerState = AccessControl.ledger(contractState.data);
     return {

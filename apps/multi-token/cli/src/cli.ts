@@ -1,7 +1,7 @@
 import { stdin as input, stdout as output } from 'node:process';
 import { createInterface } from 'node:readline/promises';
-import * as ledger from '@midnight-ntwrk/ledger-v7';
-import { nativeToken } from '@midnight-ntwrk/ledger-v7';
+import * as ledger from '@midnight-ntwrk/ledger-v8';
+import { nativeToken } from '@midnight-ntwrk/ledger-v8';
 import * as Rx from 'rxjs';
 import { Buffer } from 'buffer';
 import { type Logger } from 'pino';

@@ -14,7 +14,7 @@ services:
       start_period: 10s
 
   indexer:
-    image: 'midnightntwrk/indexer-standalone:4.0.0-rc.7'
+    image: 'midnightntwrk/indexer-standalone:4.0.0'
     env_file: standalone.env
     ports:
       - '8088:8088'
@@ -32,7 +32,7 @@ services:
         condition: service_healthy
 
   node:
-    image: 'midnightntwrk/midnight-node:0.22.0-rc.10'
+    image: 'midnightntwrk/midnight-node:0.22.0'
     ports:
       - '9944:9944'
     healthcheck:

@@ -1,5 +1,5 @@
 import { type WalletFacade } from '@midnight-ntwrk/wallet-sdk-facade';
-import { nativeToken } from '@midnight-ntwrk/ledger-v7';
+import { nativeToken } from '@midnight-ntwrk/ledger-v8';
 import * as Rx from 'rxjs';
 
 /** Wait until the wallet has fully synced with the network. Returns the synced state. */

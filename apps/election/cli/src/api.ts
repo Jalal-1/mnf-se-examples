@@ -83,7 +83,7 @@ function wrapPublicDataProviderWithRehash(inner: PublicDataProvider): PublicData
     },
     async queryZSwapAndContractState(...args) {
       const result = await inner.queryZSwapAndContractState(...args);
-      return result ? [result[0], rehashContractState(result[1])] : null;
+      return result ? [result[0], rehashContractState(result[1]), result[2]] : null;
     },
     async queryDeployContractState(...args) {
       const result = await inner.queryDeployContractState(...args);

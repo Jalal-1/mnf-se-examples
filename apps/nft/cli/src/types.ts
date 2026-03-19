@@ -1,9 +1,9 @@
 import { NFT, type NftPrivateState } from '@mnf-se/nft-contract';
 import type { MidnightProviders } from '@midnight-ntwrk/midnight-js-types';
 import type { DeployedContract, FoundContract } from '@midnight-ntwrk/midnight-js-contracts';
-import type { ImpureCircuitId } from '@midnight-ntwrk/compact-js';
+import type { ProvableCircuitId } from '@midnight-ntwrk/compact-js';
 
-export type NftCircuits = ImpureCircuitId<NFT.Contract<NftPrivateState>>;
+export type NftCircuits = ProvableCircuitId<NFT.Contract<NftPrivateState>>;
 
 export const NftPrivateStateId = 'nftPrivateState';
 

@@ -1,6 +1,6 @@
 import { type ContractAddress } from '@midnight-ntwrk/compact-runtime';
 import { FungibleToken, type FungibleTokenPrivateState } from '@mnf-se/fungible-token-contract';
-import * as ledger from '@midnight-ntwrk/ledger-v7';
+import * as ledger from '@midnight-ntwrk/ledger-v8';
 import { CompiledContract } from '@midnight-ntwrk/compact-js';
 import { deployContract, findDeployedContract } from '@midnight-ntwrk/midnight-js-contracts';
 import { httpClientProofProvider } from '@midnight-ntwrk/midnight-js-http-client-proof-provider';
