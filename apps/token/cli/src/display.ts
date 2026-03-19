@@ -14,10 +14,9 @@ export type TokenDisplayState = {
 export type WalletDisplayState = {
   address: string;
   zswapPublicKey: string;
-  unshieldedBalance: bigint;
+  nightBalance: bigint;
+  dustBalance: bigint;
   shieldedTokenBalance: bigint;
-  unshieldedTokenBalance: bigint;
-  tokenColor: string;
 };
 
 export type Message = { text: string; type: 'success' | 'error' | 'info' };
@@ -107,12 +106,8 @@ export function renderScreen(opts: RenderOptions): void {
     const unshieldedStr = state.unshieldedSupply.toString();
     lines.push(row(un, 'Total Minted', `${c.yellow}${c.bold}${unshieldedStr}${c.reset}`, unshieldedStr.length));
 
-    if (wallet) {
-      const unBal = wallet.unshieldedTokenBalance >= 0n
-        ? wallet.unshieldedTokenBalance.toString()
-        : 'n/a';
-      lines.push(row(un, 'Your Balance', `${c.green}${c.bold}${unBal}${c.reset}`, unBal.length));
-    }
+    const utxoNote = 'wallet does not auto-track custom UTXOs';
+    lines.push(row(un, 'Your Balance', `${c.dim}${utxoNote}${c.reset}`, utxoNote.length));
     lines.push(sectionFooter(un));
     lines.push('');
 
@@ -123,8 +118,16 @@ export function renderScreen(opts: RenderOptions): void {
       const shortWalletAddr = truncate(wallet.address, 46);
       lines.push(row(wlt, 'Address', `${c.dim}${shortWalletAddr}${c.reset}`, shortWalletAddr.length));
 
-      const nightStr = wallet.unshieldedBalance.toString();
-      lines.push(row(wlt, 'NIGHT (gas)', `${nightStr}`, nightStr.length));
+      const nightStr = wallet.nightBalance.toString();
+      lines.push(row(wlt, 'NIGHT', `${nightStr}${c.dim}  (stake/generate DUST)${c.reset}`, nightStr.length + 23));
+
+      const dustStr = wallet.dustBalance.toString();
+      lines.push(row(wlt, 'DUST', `${dustStr}${c.dim}  (transaction fees)${c.reset}`, dustStr.length + 20));
+
+      if (wallet.shieldedTokenBalance > 0n) {
+        const tokStr = wallet.shieldedTokenBalance.toString();
+        lines.push(row(wlt, 'Shielded Tokens', `${c.green}${c.bold}${tokStr}${c.reset}`, tokStr.length));
+      }
       lines.push(sectionFooter(wlt));
       lines.push('');
     }

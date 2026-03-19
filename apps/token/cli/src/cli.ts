@@ -86,25 +86,18 @@ async function getWalletDisplayState(
   tokenColor?: string,
 ): Promise<WalletDisplayState> {
   const walletState = await Rx.firstValueFrom(walletContext.wallet.state());
-  const unshieldedBalance = walletState.unshielded?.balances[nativeToken().raw] ?? 0n;
-
-  // Shielded custom token balance (if color known)
+  const nightBalance = walletState.unshielded?.balances[nativeToken().raw] ?? 0n;
+  const dustBalance = await api.getDustBalance(walletContext.wallet);
   const shieldedTokenBalance = tokenColor
     ? (walletState.shielded?.balances[tokenColor] ?? 0n)
-    : 0n;
-
-  // Unshielded custom token balance (if wallet tracks it)
-  const unshieldedTokenBalance = tokenColor
-    ? (walletState.unshielded?.balances[tokenColor] ?? 0n)
     : 0n;
 
   return {
     address: walletContext.unshieldedKeystore.getBech32Address().toString(),
     zswapPublicKey: String(walletContext.shieldedSecretKeys.coinPublicKey),
-    unshieldedBalance,
+    nightBalance,
+    dustBalance,
     shieldedTokenBalance,
-    unshieldedTokenBalance,
-    tokenColor: tokenColor ?? '',
   };
 }
 
@@ -117,20 +110,13 @@ async function authorityLoop(
   contractAddress: string,
 ): Promise<void> {
   let message: Message | undefined;
-  let knownTokenColor: string | undefined;
   const zswapPubKey = ledger.encodeCoinPublicKey(walletContext.shieldedSecretKeys.coinPublicKey);
 
   while (true) {
     const state = await fetchTokenState(providers, contractAddress);
-    // Pick up token color from wallet shielded balances (first non-NIGHT balance seen)
-    if (!knownTokenColor) {
-      const allBalances = await api.getAllShieldedBalances(walletContext.wallet);
-      const nativeRaw = nativeToken().raw;
-      const customColors = Object.keys(allBalances).filter(k => k !== nativeRaw && allBalances[k]! > 0n);
-      if (customColors.length > 0) knownTokenColor = customColors[0];
-    }
-    const walletDisplay = await getWalletDisplayState(walletContext, knownTokenColor);
-    if (state) state.tokenColor = knownTokenColor ?? '';
+    // Token color is computed from domain_separator + contract address (rawTokenType)
+    const tokenColor = state?.tokenColor;
+    const walletDisplay = await getWalletDisplayState(walletContext, tokenColor);
 
     renderScreen({ role: 'authority', state, contractAddress, wallet: walletDisplay, message });
     message = undefined;
@@ -218,18 +204,11 @@ async function userLoop(
   contractAddress: string,
 ): Promise<void> {
   let message: Message | undefined;
-  let knownTokenColor: string | undefined;
 
   while (true) {
     const state = await fetchTokenState(providers, contractAddress);
-    if (!knownTokenColor) {
-      const allBalances = await api.getAllShieldedBalances(walletContext.wallet);
-      const nativeRaw = nativeToken().raw;
-      const customColors = Object.keys(allBalances).filter(k => k !== nativeRaw && allBalances[k]! > 0n);
-      if (customColors.length > 0) knownTokenColor = customColors[0];
-    }
-    const walletDisplay = await getWalletDisplayState(walletContext, knownTokenColor);
-    if (state) state.tokenColor = knownTokenColor ?? '';
+    const tokenColor = state?.tokenColor;
+    const walletDisplay = await getWalletDisplayState(walletContext, tokenColor);
 
     renderScreen({ role: 'user', state, contractAddress, wallet: walletDisplay, message });
     message = undefined;

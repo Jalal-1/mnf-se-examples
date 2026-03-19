@@ -1,4 +1,4 @@
-import { type ContractAddress, CompactTypeBytes, persistentHash } from '@midnight-ntwrk/compact-runtime';
+import { type ContractAddress, CompactTypeBytes, persistentHash, rawTokenType } from '@midnight-ntwrk/compact-runtime';
 import { Token, type TokenPrivateState, createWitnesses } from '@mnf-se/token-contract';
 import * as ledger from '@midnight-ntwrk/ledger-v8';
 import { CompiledContract } from '@midnight-ntwrk/compact-js';
@@ -163,7 +163,10 @@ export const getTokenState = async (
     const dsBytes = bytesType.fromValue([...dsCell.value]);
     const domainSeparator = new TextDecoder().decode(dsBytes).replace(/\0+$/, '');
 
-    return { owner, shieldedSupply, unshieldedSupply, domainSeparator, tokenColor: '' };
+    // Compute the token color (used for wallet balance lookup)
+    const tokenColor = rawTokenType(dsBytes, contractAddress);
+
+    return { owner, shieldedSupply, unshieldedSupply, domainSeparator, tokenColor };
   } catch (e) {
     logger.warn(`Failed to parse token state: ${e}`);
     return null;
@@ -183,6 +186,12 @@ export const getShieldedTokenBalance = async (
 export const getAllShieldedBalances = async (wallet: WalletContext['wallet']): Promise<Record<string, bigint>> => {
   const state = await Rx.firstValueFrom(wallet.state());
   return state.shielded?.balances ?? {};
+};
+
+export const getDustBalance = async (wallet: WalletContext['wallet']): Promise<bigint> => {
+  const state = await Rx.firstValueFrom(wallet.state());
+  const coins = state.dust?.totalCoins ?? [];
+  return (coins as unknown as Array<{ initialValue: bigint }>).reduce((sum, c) => sum + c.initialValue, 0n);
 };
 
 /**
