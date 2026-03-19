@@ -170,6 +170,25 @@ export circuit mint(amount: Uint<16>, recipient_key: ZswapCoinPublicKey): Shield
 - Transfers happen at Zswap protocol level (no contract call needed)
 - Burns use `receiveShielded` to destroy coins
 
+### Unshielded tokens (mintUnshieldedToken) — CRITICAL CONSTRAINT
+```compact
+// MUST be a guaranteed circuit (no assert anywhere in the call tree).
+// assert makes a circuit fallible; fallible transcripts discard unshielded
+// mint effects, causing EffectsCheckFailure (error 186) at the ledger.
+circuit mint_unshielded(amount: Uint<16>, recipient: UserAddress): Bytes<32> {
+  // No assert_owner(), no assert() — move validation to TypeScript
+  total_supply.increment(disclose(amount));
+  return mintUnshieldedToken(
+    domain_separator,
+    disclose(amount) as Uint<64>,
+    right<ContractAddress, UserAddress>(disclose(recipient))
+  );
+}
+```
+- In TypeScript: use `encodeUserAddress(keystore.getAddress())` to get the recipient bytes
+- Validate amount > 0 on the TypeScript side before calling the circuit
+- See: https://github.com/LFDT-Minokawa/compact/issues/235
+
 ### MerkleTree state (Election)
 ```compact
 export ledger eligible_voters: MerkleTree<10, Bytes<32>>;

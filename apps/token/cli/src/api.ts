@@ -1,6 +1,6 @@
 import { type ContractAddress, CompactTypeBytes, persistentHash } from '@midnight-ntwrk/compact-runtime';
 import { Token, type TokenPrivateState, createWitnesses } from '@mnf-se/token-contract';
-import * as ledger from '@midnight-ntwrk/ledger-v7';
+import * as ledger from '@midnight-ntwrk/ledger-v8';
 import { CompiledContract } from '@midnight-ntwrk/compact-js';
 import { deployContract, findDeployedContract } from '@midnight-ntwrk/midnight-js-contracts';
 import { httpClientProofProvider } from '@midnight-ntwrk/midnight-js-http-client-proof-provider';
@@ -108,6 +108,7 @@ export const mintUnshieldedTokens = async (
   amount: number,
   recipientAddress: Uint8Array,
 ): Promise<FinalizedTxData> => {
+  if (amount <= 0) throw new Error('Amount must be greater than zero');
   logger.info(`Minting ${amount} unshielded tokens to ${Buffer.from(recipientAddress).toString('hex').substring(0, 16)}...`);
   const finalizedTxData = await contract.callTx.mint_unshielded(BigInt(amount), { bytes: recipientAddress });
   logger.info(`Transaction ${finalizedTxData.public.txId} added in block ${finalizedTxData.public.blockHeight}`);

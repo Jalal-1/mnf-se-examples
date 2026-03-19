@@ -1,7 +1,7 @@
 import { stdin as input, stdout as output } from 'node:process';
 import { createInterface } from 'node:readline/promises';
-import * as ledger from '@midnight-ntwrk/ledger-v7';
-import { nativeToken } from '@midnight-ntwrk/ledger-v7';
+import * as ledger from '@midnight-ntwrk/ledger-v8';
+import { nativeToken, encodeUserAddress } from '@midnight-ntwrk/ledger-v8';
 import * as Rx from 'rxjs';
 import { Buffer } from 'buffer';
 import { type Logger } from 'pino';
@@ -163,9 +163,8 @@ async function authorityLoop(
               break;
             }
           } else {
-            // Use own unshielded public key as recipient
-            const pubKeyHex = walletContext.unshieldedKeystore.getPublicKey();
-            recipientAddr = new Uint8Array(Buffer.from(String(pubKeyHex), 'hex'));
+            // Use own unshielded address as recipient (UserAddress = 32-byte hash of public key)
+            recipientAddr = encodeUserAddress(walletContext.unshieldedKeystore.getAddress());
           }
           console.log(`\n    ${c.dim}Generating ZK proof and submitting transaction...${c.reset}`);
           await api.mintUnshieldedTokens(contract, uAmount, recipientAddr);

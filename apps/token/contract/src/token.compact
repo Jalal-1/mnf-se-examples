@@ -47,12 +47,14 @@ circuit mint(amount: Uint<16>, recipient_key: ZswapCoinPublicKey): ShieldedCoinI
   );
 }
 
-// ── Unshielded Mint: owner mints unshielded UTXO tokens to a user ────
-// Recipient is a UserAddress (secp256k1 public key hash).
-// Returns the token color (Bytes<32>).
+// ── Unshielded Mint: mints unshielded UTXO tokens to a recipient ─────
+// IMPORTANT: This circuit MUST be guaranteed (no assert statements).
+// mintUnshieldedToken is incompatible with fallible transcript segments.
+// Any assert (including via assert_owner) makes the circuit fallible,
+// causing the ledger to reject with EffectsCheckFailure (error 186).
+// Access control and zero-amount validation are enforced client-side.
+// See: https://github.com/LFDT-Minokawa/compact/issues/235
 circuit mint_unshielded(amount: Uint<16>, recipient: UserAddress): Bytes<32> {
-  assert_owner();
-  assert(disclose(amount) > 0, "Amount must be greater than zero");
   const ds = domain_separator;
   total_supply.increment(disclose(amount));
   return mintUnshieldedToken(
