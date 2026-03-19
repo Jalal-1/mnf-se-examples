@@ -2,7 +2,7 @@ import { Token, type TokenPrivateState } from '@mnf-se/token-contract';
 import type { MidnightProviders } from '@midnight-ntwrk/midnight-js-types';
 import type { DeployedContract, FoundContract } from '@midnight-ntwrk/midnight-js-contracts';
 
-export type TokenCircuits = 'mint' | 'mint_unshielded' | 'burn' | 'get_total_supply' | 'get_color';
+export type TokenCircuits = 'mint' | 'mint_unshielded' | 'burn' | 'get_color';
 
 export const TokenPrivateStateId = 'tokenPrivateState';
 

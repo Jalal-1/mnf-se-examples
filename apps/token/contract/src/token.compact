@@ -1,12 +1,13 @@
 pragma language_version >= 0.20;
 
-export { mint, mint_unshielded, burn, get_total_supply, get_color }
+export { mint, mint_unshielded, burn, get_color }
 
 import CompactStandardLibrary;
 
 // ── Ledger State ──────────────────────────────────────────────────────
 ledger owner: Bytes<32>;
-ledger total_supply: Counter;
+ledger shielded_supply: Counter;   // tokens minted as private zswap coins
+ledger unshielded_supply: Counter; // tokens minted as public UTXO
 ledger domain_separator: Bytes<32>;
 
 // ── Witnesses ─────────────────────────────────────────────────────────
@@ -31,14 +32,15 @@ circuit assert_owner(): [] {
   assert(pk == owner, "Only owner can perform this action");
 }
 
-// ── Shielded Mint: owner mints shielded tokens to a recipient ────────
+// ── Shielded Mint: owner mints private zswap coins to a recipient ─────
+// Tokens are private — balances hidden from public view.
 // Amount limited to Uint<16> (max 65535) per tx due to Counter constraint.
 circuit mint(amount: Uint<16>, recipient_key: ZswapCoinPublicKey): ShieldedCoinInfo {
   assert_owner();
   assert(disclose(amount) > 0, "Amount must be greater than zero");
   const nonce = disclose(local$nonce());
   const ds = domain_separator;
-  total_supply.increment(disclose(amount));
+  shielded_supply.increment(disclose(amount));
   return mintShieldedToken(
     ds,
     disclose(amount),
@@ -47,16 +49,18 @@ circuit mint(amount: Uint<16>, recipient_key: ZswapCoinPublicKey): ShieldedCoinI
   );
 }
 
-// ── Unshielded Mint: mints unshielded UTXO tokens to a recipient ─────
-// IMPORTANT: This circuit MUST be guaranteed (no assert statements).
-// mintUnshieldedToken is incompatible with fallible transcript segments.
-// Any assert (including via assert_owner) makes the circuit fallible,
-// causing the ledger to reject with EffectsCheckFailure (error 186).
+// ── Unshielded Mint: mints public UTXO tokens to a recipient ─────────
+// Tokens are public — amounts visible on-chain, owned by a secp256k1 address.
+//
+// IMPORTANT: This circuit MUST be guaranteed (no assert anywhere in the call
+// tree). mintUnshieldedToken is incompatible with fallible transcript segments.
+// Any assert (including via assert_owner) makes the circuit fallible, causing
+// the ledger to reject with EffectsCheckFailure (error 186).
 // Access control and zero-amount validation are enforced client-side.
 // See: https://github.com/LFDT-Minokawa/compact/issues/235
 circuit mint_unshielded(amount: Uint<16>, recipient: UserAddress): Bytes<32> {
   const ds = domain_separator;
-  total_supply.increment(disclose(amount));
+  unshielded_supply.increment(disclose(amount));
   return mintUnshieldedToken(
     ds,
     disclose(amount) as Uint<64>,
@@ -71,12 +75,9 @@ circuit burn(coin: ShieldedCoinInfo): [] {
   receiveShielded(disclose(coin));
 }
 
-// ── Read total supply ─────────────────────────────────────────────────
-circuit get_total_supply(): Uint<64> {
-  return total_supply;
-}
-
 // ── Get token color ───────────────────────────────────────────────────
+// Both shielded and unshielded tokens share the same color (token type),
+// derived from the domain_separator and contract address.
 circuit get_color(): Bytes<32> {
   return tokenType(domain_separator, kernel.self());
 }

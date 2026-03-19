@@ -1,20 +1,22 @@
-import { c, DIVIDER } from '@mnf-se/common';
+import { c } from '@mnf-se/common';
 
-const WIDTH = 64;
-const BOX_W = WIDTH - 4;
+const WIDTH = 66;
+const INNER = WIDTH - 4; // inner content width (between borders)
 
 export type TokenDisplayState = {
   owner: string;
-  totalSupply: bigint;
+  shieldedSupply: bigint;
+  unshieldedSupply: bigint;
   domainSeparator: string;
+  tokenColor: string;
 } | null;
 
 export type WalletDisplayState = {
   address: string;
   zswapPublicKey: string;
   unshieldedBalance: bigint;
-  shieldedNightBalance: bigint;
-  tokenBalance: bigint;
+  shieldedTokenBalance: bigint;
+  unshieldedTokenBalance: bigint;
   tokenColor: string;
 };
 
@@ -28,114 +30,144 @@ export type RenderOptions = {
   message?: Message;
 };
 
-function center(text: string, width: number): string {
-  const pad = Math.max(0, Math.floor((width - text.length) / 2));
-  return ' '.repeat(pad) + text + ' '.repeat(Math.max(0, width - pad - text.length));
-}
-
-function boxRow(border: string, label: string, value: string, valueLen: number, labelW = 14): string {
-  const contentW = BOX_W - 4;
-  const pad = Math.max(0, contentW - labelW - valueLen);
-  return `  ${border}|${c.reset} ${c.gray}${label}${c.reset}${' '.repeat(labelW - label.length)}${value}${' '.repeat(pad)}${border}|${c.reset}`;
-}
-
 export function clearScreen(): void {
   process.stdout.write('\x1b[2J\x1b[H');
 }
 
+function row(border: string, label: string, value: string, visibleValueLen: number): string {
+  const labelW = 18;
+  const gap = Math.max(0, INNER - 2 - labelW - visibleValueLen);
+  return `  ${border}| ${c.gray}${label.padEnd(labelW)}${c.reset}${value}${' '.repeat(gap)} ${border}|${c.reset}`;
+}
+
+function sectionHeader(color: string, title: string, sub: string): string[] {
+  const lines: string[] = [];
+  lines.push(`  ${color}+── ${title} ${'─'.repeat(Math.max(0, INNER - title.length - 5))}+${c.reset}`);
+  if (sub) {
+    lines.push(`  ${color}|${c.reset} ${c.dim}${sub}${' '.repeat(Math.max(0, INNER - 2 - sub.length))}${c.reset}${color}|${c.reset}`);
+    lines.push(`  ${color}|${c.reset}${' '.repeat(INNER)}${color}|${c.reset}`);
+  }
+  return lines;
+}
+
+function sectionFooter(color: string): string {
+  return `  ${color}+${'─'.repeat(INNER)}+${c.reset}`;
+}
+
+function truncate(s: string, max: number): string {
+  return s.length > max ? s.substring(0, max - 3) + '...' : s;
+}
+
 export function renderScreen(opts: RenderOptions): void {
   clearScreen();
-
   const { role, state, contractAddress, message, wallet } = opts;
   const accent = role === 'authority' ? c.cyan : c.green;
-  const title = role === 'authority' ? 'SHIELDED TOKEN - AUTHORITY' : 'SHIELDED TOKEN - USER';
+  const titleText = role === 'authority' ? 'MIDNIGHT TOKEN  ·  AUTHORITY' : 'MIDNIGHT TOKEN  ·  USER';
   const lines: string[] = [];
 
+  // ── Header ──────────────────────────────────────────────────────────
   lines.push('');
   lines.push(`  ${accent}+${'='.repeat(WIDTH - 2)}+${c.reset}`);
-  lines.push(`  ${accent}|${c.bold}${center(title, WIDTH - 2)}${c.reset}${accent}|${c.reset}`);
-  lines.push(`  ${accent}|${c.reset}${center('MNF Solutions Engineering', WIDTH - 2)}${accent}|${c.reset}`);
+  lines.push(`  ${accent}|${c.bold}  ${titleText}${' '.repeat(Math.max(0, WIDTH - 2 - titleText.length - 2))}${c.reset}${accent}|${c.reset}`);
+  lines.push(`  ${accent}|${c.reset}  ${c.dim}MNF Solutions Engineering${c.reset}${' '.repeat(Math.max(0, WIDTH - 30))}${accent}|${c.reset}`);
   lines.push(`  ${accent}+${'='.repeat(WIDTH - 2)}+${c.reset}`);
+  lines.push('');
+
+  // ── Contract address ────────────────────────────────────────────────
+  const shortAddr = truncate(contractAddress, 52);
+  lines.push(`    ${c.gray}Contract${c.reset}   ${c.dim}${shortAddr}${c.reset}`);
   lines.push('');
 
   if (state) {
-    const shortAddr = contractAddress.length > 48
-      ? contractAddress.substring(0, 48) + '...'
-      : contractAddress;
-    lines.push(`    ${c.gray}Contract${c.reset}      ${shortAddr}`);
+    const tokenName = state.domainSeparator || '(unnamed)';
+    const colorDisplay = state.tokenColor
+      ? truncate(state.tokenColor, 32) + '...'
+      : c.dim + '(read from wallet balances)' + c.reset;
+
+    // ── Shielded Tokens section ────────────────────────────────────────
+    const sh = c.blue;
+    lines.push(...sectionHeader(sh, 'SHIELDED TOKENS', 'Private · balances hidden · owned by Zswap (BLS) keys'));
+    lines.push(row(sh, 'Token Name', `${c.white}${c.bold}${tokenName}${c.reset}`, tokenName.length));
+
+    const shieldedStr = state.shieldedSupply.toString();
+    lines.push(row(sh, 'Total Minted', `${c.yellow}${c.bold}${shieldedStr}${c.reset}`, shieldedStr.length));
+
+    if (wallet && wallet.shieldedTokenBalance >= 0n) {
+      const myBal = wallet.shieldedTokenBalance.toString();
+      lines.push(row(sh, 'Your Balance', `${c.green}${c.bold}${myBal}${c.reset}`, myBal.length));
+    }
+    lines.push(sectionFooter(sh));
     lines.push('');
 
-    const pub = c.blue;
-    lines.push(`  ${pub}+${'─'.repeat(BOX_W - 2)}+${c.reset}`);
-    lines.push(`  ${pub}|${c.reset} ${pub}${c.bold}CONTRACT STATE${c.reset} ${c.dim}(on-chain)${c.reset}${' '.repeat(Math.max(0, BOX_W - 28))}${pub}|${c.reset}`);
-    lines.push(`  ${pub}|${c.reset}${' '.repeat(BOX_W - 2)}${pub}|${c.reset}`);
+    // ── Unshielded Tokens section ──────────────────────────────────────
+    const un = c.magenta;
+    lines.push(...sectionHeader(un, 'UNSHIELDED TOKENS (UTXO)', 'Public · amounts visible on-chain · owned by secp256k1 keys'));
+    lines.push(row(un, 'Token Name', `${c.white}${c.bold}${tokenName}${c.reset}`, tokenName.length));
 
-    lines.push(boxRow(pub, 'Token Name', `${c.white}${c.bold}${state.domainSeparator || '(empty)'}${c.reset}`, (state.domainSeparator || '(empty)').length));
-
-    const shortOwner = state.owner.substring(0, 16) + '...' + state.owner.substring(48);
-    lines.push(boxRow(pub, 'Owner', `${c.dim}${shortOwner}${c.reset}`, shortOwner.length));
-
-    const supplyStr = state.totalSupply.toString();
-    lines.push(boxRow(pub, 'Total Supply', `${c.yellow}${c.bold}${supplyStr}${c.reset}`, supplyStr.length));
-
-    lines.push(`  ${pub}+${'─'.repeat(BOX_W - 2)}+${c.reset}`);
-    lines.push('');
+    const unshieldedStr = state.unshieldedSupply.toString();
+    lines.push(row(un, 'Total Minted', `${c.yellow}${c.bold}${unshieldedStr}${c.reset}`, unshieldedStr.length));
 
     if (wallet) {
-      const wlt = c.magenta;
-      lines.push(`  ${wlt}+${'─'.repeat(BOX_W - 2)}+${c.reset}`);
-      lines.push(`  ${wlt}|${c.reset} ${wlt}${c.bold}WALLET${c.reset} ${c.dim}(local)${c.reset}${' '.repeat(Math.max(0, BOX_W - 18))}${wlt}|${c.reset}`);
-      lines.push(`  ${wlt}|${c.reset}${' '.repeat(BOX_W - 2)}${wlt}|${c.reset}`);
+      const unBal = wallet.unshieldedTokenBalance >= 0n
+        ? wallet.unshieldedTokenBalance.toString()
+        : 'n/a';
+      lines.push(row(un, 'Your Balance', `${c.green}${c.bold}${unBal}${c.reset}`, unBal.length));
+    }
+    lines.push(sectionFooter(un));
+    lines.push('');
 
-      const shortWalletAddr = wallet.address.length > 36
-        ? wallet.address.substring(0, 36) + '...'
-        : wallet.address;
-      lines.push(boxRow(wlt, 'Address', `${c.dim}${shortWalletAddr}${c.reset}`, shortWalletAddr.length));
+    // ── Wallet section ─────────────────────────────────────────────────
+    if (wallet) {
+      const wlt = c.white;
+      lines.push(...sectionHeader(wlt, 'YOUR WALLET', ''));
+      const shortWalletAddr = truncate(wallet.address, 46);
+      lines.push(row(wlt, 'Address', `${c.dim}${shortWalletAddr}${c.reset}`, shortWalletAddr.length));
 
       const nightStr = wallet.unshieldedBalance.toString();
-      lines.push(boxRow(wlt, 'NIGHT', `${c.white}${nightStr}${c.reset}`, nightStr.length));
-
-      const tokenStr = wallet.tokenBalance.toString();
-      lines.push(boxRow(wlt, 'Token Bal', `${c.green}${c.bold}${tokenStr}${c.reset}`, tokenStr.length));
-
-      lines.push(`  ${wlt}+${'─'.repeat(BOX_W - 2)}+${c.reset}`);
+      lines.push(row(wlt, 'NIGHT (gas)', `${nightStr}`, nightStr.length));
+      lines.push(sectionFooter(wlt));
       lines.push('');
     }
   } else {
-    lines.push(`    ${c.dim}Loading state...${c.reset}`);
+    lines.push(`    ${c.dim}Loading contract state...${c.reset}`);
     lines.push('');
   }
 
+  // ── Message ────────────────────────────────────────────────────────
   if (message) {
     const msgColor = message.type === 'success' ? c.green
       : message.type === 'error' ? c.red
-        : c.blue;
-    const prefix = message.type === 'success' ? '+'
-      : message.type === 'error' ? '!'
-        : '>';
+      : c.blue;
+    const prefix = message.type === 'success' ? '+' : message.type === 'error' ? '!' : '>';
     lines.push(`    ${msgColor}[${prefix}] ${message.text}${c.reset}`);
     lines.push('');
   }
 
-  lines.push(`  ${c.gray}${'─'.repeat(WIDTH)}${c.reset}`);
+  lines.push(`  ${c.dim}${'─'.repeat(WIDTH)}${c.reset}`);
   lines.push('');
 
+  // ── Menu ────────────────────────────────────────────────────────────
   if (role === 'authority') {
-    lines.push(`    ${accent}1${c.reset}  Mint shielded tokens`);
-    lines.push(`    ${accent}2${c.reset}  Mint unshielded tokens (UTXO)`);
-    lines.push(`    ${accent}3${c.reset}  View total supply`);
-    lines.push(`    ${accent}4${c.reset}  View all shielded balances`);
-    lines.push(`    ${accent}5${c.reset}  Refresh`);
-    lines.push(`    ${accent}6${c.reset}  Exit`);
+    lines.push(`    ${c.blue}${c.bold}── SHIELDED${c.reset}`);
+    lines.push(`    ${c.blue}1${c.reset}  Mint shielded tokens     ${c.dim}(private · zswap coins · hidden balances)${c.reset}`);
+    lines.push('');
+    lines.push(`    ${c.magenta}${c.bold}── UNSHIELDED${c.reset}`);
+    lines.push(`    ${c.magenta}2${c.reset}  Mint unshielded tokens   ${c.dim}(public · UTXOs · visible on-chain)${c.reset}`);
+    lines.push('');
+    lines.push(`    ${c.dim}── OTHER${c.reset}`);
+    lines.push(`    ${c.dim}3${c.reset}  ${c.dim}Refresh${c.reset}`);
+    lines.push(`    ${c.dim}4${c.reset}  ${c.dim}Exit${c.reset}`);
   } else {
-    lines.push(`    ${accent}1${c.reset}  View token balance`);
-    lines.push(`    ${accent}2${c.reset}  View all shielded balances`);
-    lines.push(`    ${accent}3${c.reset}  Refresh`);
-    lines.push(`    ${accent}4${c.reset}  Exit`);
+    lines.push(`    ${c.blue}${c.bold}── SHIELDED${c.reset}`);
+    lines.push(`    ${c.blue}1${c.reset}  View my shielded balances ${c.dim}(private token coins)${c.reset}`);
+    lines.push('');
+    lines.push(`    ${c.dim}── OTHER${c.reset}`);
+    lines.push(`    ${c.dim}2${c.reset}  ${c.dim}Refresh${c.reset}`);
+    lines.push(`    ${c.dim}3${c.reset}  ${c.dim}Exit${c.reset}`);
   }
 
   lines.push('');
-  lines.push(`  ${c.gray}${'─'.repeat(WIDTH)}${c.reset}`);
+  lines.push(`  ${c.dim}${'─'.repeat(WIDTH)}${c.reset}`);
   lines.push('');
 
   process.stdout.write(lines.join('\n'));

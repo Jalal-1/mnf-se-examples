@@ -129,8 +129,10 @@ export const burnTokens = async (
 
 export type TokenPublicState = {
   owner: string;
-  totalSupply: bigint;
+  shieldedSupply: bigint;
+  unshieldedSupply: bigint;
   domainSeparator: string;
+  tokenColor: string;
 };
 
 export const getTokenState = async (
@@ -147,20 +149,21 @@ export const getTokenState = async (
     const bytesType = new cr.CompactTypeBytes(32);
     const uintType = new cr.CompactTypeUnsignedInteger(18446744073709551615n, 8);
 
+    // State layout: [0]=owner, [1]=shielded_supply, [2]=unshielded_supply, [3]=domain_separator
     const ownerCell = stateArr[0]!.asCell()!;
-    const ownerVal: Uint8Array[] = [...ownerCell.value];
-    const owner = Buffer.from(bytesType.fromValue(ownerVal)).toString('hex');
+    const owner = Buffer.from(bytesType.fromValue([...ownerCell.value])).toString('hex');
 
-    const supplyCell = stateArr[1]!.asCell()!;
-    const supplyVal: Uint8Array[] = [...supplyCell.value];
-    const totalSupply = uintType.fromValue(supplyVal);
+    const shieldedCell = stateArr[1]!.asCell()!;
+    const shieldedSupply = uintType.fromValue([...shieldedCell.value]);
 
-    const dsCell = stateArr[2]!.asCell()!;
-    const dsVal: Uint8Array[] = [...dsCell.value];
-    const dsBytes = bytesType.fromValue(dsVal);
+    const unshieldedCell = stateArr[2]!.asCell()!;
+    const unshieldedSupply = uintType.fromValue([...unshieldedCell.value]);
+
+    const dsCell = stateArr[3]!.asCell()!;
+    const dsBytes = bytesType.fromValue([...dsCell.value]);
     const domainSeparator = new TextDecoder().decode(dsBytes).replace(/\0+$/, '');
 
-    return { owner, totalSupply, domainSeparator };
+    return { owner, shieldedSupply, unshieldedSupply, domainSeparator, tokenColor: '' };
   } catch (e) {
     logger.warn(`Failed to parse token state: ${e}`);
     return null;

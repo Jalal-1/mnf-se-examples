@@ -68,7 +68,7 @@ async function setupWallet(config: Config): Promise<WalletContext> {
   }
 }
 
-// ── Fetch State ────────────────────────────────────────────────────────
+// ── Fetch Display State ────────────────────────────────────────────────
 
 async function fetchTokenState(
   providers: TokenProviders,
@@ -87,15 +87,23 @@ async function getWalletDisplayState(
 ): Promise<WalletDisplayState> {
   const walletState = await Rx.firstValueFrom(walletContext.wallet.state());
   const unshieldedBalance = walletState.unshielded?.balances[nativeToken().raw] ?? 0n;
-  const shieldedNightBalance = walletState.shielded?.balances[nativeToken().raw] ?? 0n;
-  const tokenBalance = tokenColor ? (walletState.shielded?.balances[tokenColor] ?? 0n) : 0n;
+
+  // Shielded custom token balance (if color known)
+  const shieldedTokenBalance = tokenColor
+    ? (walletState.shielded?.balances[tokenColor] ?? 0n)
+    : 0n;
+
+  // Unshielded custom token balance (if wallet tracks it)
+  const unshieldedTokenBalance = tokenColor
+    ? (walletState.unshielded?.balances[tokenColor] ?? 0n)
+    : 0n;
 
   return {
     address: walletContext.unshieldedKeystore.getBech32Address().toString(),
     zswapPublicKey: String(walletContext.shieldedSecretKeys.coinPublicKey),
     unshieldedBalance,
-    shieldedNightBalance,
-    tokenBalance,
+    shieldedTokenBalance,
+    unshieldedTokenBalance,
     tokenColor: tokenColor ?? '',
   };
 }
@@ -109,11 +117,21 @@ async function authorityLoop(
   contractAddress: string,
 ): Promise<void> {
   let message: Message | undefined;
+  let knownTokenColor: string | undefined;
   const zswapPubKey = ledger.encodeCoinPublicKey(walletContext.shieldedSecretKeys.coinPublicKey);
 
   while (true) {
     const state = await fetchTokenState(providers, contractAddress);
-    const walletDisplay = await getWalletDisplayState(walletContext);
+    // Pick up token color from wallet shielded balances (first non-NIGHT balance seen)
+    if (!knownTokenColor) {
+      const allBalances = await api.getAllShieldedBalances(walletContext.wallet);
+      const nativeRaw = nativeToken().raw;
+      const customColors = Object.keys(allBalances).filter(k => k !== nativeRaw && allBalances[k]! > 0n);
+      if (customColors.length > 0) knownTokenColor = customColors[0];
+    }
+    const walletDisplay = await getWalletDisplayState(walletContext, knownTokenColor);
+    if (state) state.tokenColor = knownTokenColor ?? '';
+
     renderScreen({ role: 'authority', state, contractAddress, wallet: walletDisplay, message });
     message = undefined;
 
@@ -121,76 +139,62 @@ async function authorityLoop(
 
     try {
       switch (choice) {
+        // ── SHIELDED MINT ──────────────────────────────────────────────
         case '1': {
-          const amountStr = await prompt('Amount to mint (max 65535): ');
+          const amountStr = await prompt('Amount to mint (shielded, max 65535): ');
           const amount = parseInt(amountStr, 10);
           if (isNaN(amount) || amount <= 0 || amount > 65535) {
             message = { text: 'Amount must be between 1 and 65535', type: 'error' };
             break;
           }
-          const recipientChoice = await prompt('Mint to (1=self, 2=other): ');
+          const recipientChoice = await prompt('Recipient (1=myself, 2=other address): ');
           let recipientKey: Uint8Array;
           if (recipientChoice === '2') {
-            const keyHex = await prompt('Recipient Zswap public key (hex): ');
+            const keyHex = await prompt('Recipient Zswap public key (64 hex chars): ');
             recipientKey = new Uint8Array(Buffer.from(keyHex, 'hex'));
             if (recipientKey.length !== 32) {
-              message = { text: 'Zswap public key must be 32 bytes (64 hex chars)', type: 'error' };
+              message = { text: 'Zswap key must be 32 bytes (64 hex chars)', type: 'error' };
               break;
             }
           } else {
             recipientKey = zswapPubKey;
           }
-          console.log(`\n    ${c.dim}Generating ZK proof and submitting transaction...${c.reset}`);
+          console.log(`\n    ${c.dim}Generating ZK proof and submitting...${c.reset}`);
           await api.mintTokens(contract, amount, recipientKey);
-          message = { text: `Minted ${amount} tokens successfully`, type: 'success' };
+          message = { text: `Minted ${amount} shielded tokens — now in your private balance`, type: 'success' };
           break;
         }
+
+        // ── UNSHIELDED MINT ────────────────────────────────────────────
         case '2': {
-          // Mint unshielded tokens
-          const uAmountStr = await prompt('Amount to mint (max 65535): ');
-          const uAmount = parseInt(uAmountStr, 10);
-          if (isNaN(uAmount) || uAmount <= 0 || uAmount > 65535) {
+          const amountStr = await prompt('Amount to mint (unshielded UTXO, max 65535): ');
+          const amount = parseInt(amountStr, 10);
+          if (isNaN(amount) || amount <= 0 || amount > 65535) {
             message = { text: 'Amount must be between 1 and 65535', type: 'error' };
             break;
           }
-          const uRecipientChoice = await prompt('Mint to (1=self, 2=other): ');
+          const recipientChoice = await prompt('Recipient (1=myself, 2=other address): ');
           let recipientAddr: Uint8Array;
-          if (uRecipientChoice === '2') {
-            const addrHex = await prompt('Recipient address (32-byte hex): ');
+          if (recipientChoice === '2') {
+            const addrHex = await prompt('Recipient UserAddress (64 hex chars): ');
             recipientAddr = new Uint8Array(Buffer.from(addrHex, 'hex'));
             if (recipientAddr.length !== 32) {
-              message = { text: 'Address must be 32 bytes (64 hex chars)', type: 'error' };
+              message = { text: 'UserAddress must be 32 bytes (64 hex chars)', type: 'error' };
               break;
             }
           } else {
-            // Use own unshielded address as recipient (UserAddress = 32-byte hash of public key)
             recipientAddr = encodeUserAddress(walletContext.unshieldedKeystore.getAddress());
           }
-          console.log(`\n    ${c.dim}Generating ZK proof and submitting transaction...${c.reset}`);
-          await api.mintUnshieldedTokens(contract, uAmount, recipientAddr);
-          message = { text: `Minted ${uAmount} unshielded tokens successfully`, type: 'success' };
+          console.log(`\n    ${c.dim}Generating ZK proof and submitting...${c.reset}`);
+          await api.mintUnshieldedTokens(contract, amount, recipientAddr);
+          message = { text: `Minted ${amount} unshielded UTXO tokens — visible on-chain`, type: 'success' };
           break;
         }
-        case '3': {
-          const state2 = await fetchTokenState(providers, contractAddress);
-          message = { text: `Total supply: ${state2?.totalSupply ?? 'unknown'}`, type: 'info' };
-          break;
-        }
-        case '4': {
-          const balances = await api.getAllShieldedBalances(walletContext.wallet);
-          const entries = Object.entries(balances).filter(([, v]) => v > 0n);
-          if (entries.length === 0) {
-            message = { text: 'No shielded token balances', type: 'info' };
-          } else {
-            const balanceStr = entries.map(([color, val]) => `${color.substring(0, 16)}...: ${val}`).join(', ');
-            message = { text: `Shielded: ${balanceStr}`, type: 'info' };
-          }
-          break;
-        }
-        case '5':
+
+        case '3':
           message = { text: 'Refreshed', type: 'info' };
           break;
-        case '6':
+        case '4':
           clearScreen();
           console.log(`\n  ${c.dim}Session ended.${c.reset}\n`);
           return;
@@ -214,10 +218,19 @@ async function userLoop(
   contractAddress: string,
 ): Promise<void> {
   let message: Message | undefined;
+  let knownTokenColor: string | undefined;
 
   while (true) {
     const state = await fetchTokenState(providers, contractAddress);
-    const walletDisplay = await getWalletDisplayState(walletContext);
+    if (!knownTokenColor) {
+      const allBalances = await api.getAllShieldedBalances(walletContext.wallet);
+      const nativeRaw = nativeToken().raw;
+      const customColors = Object.keys(allBalances).filter(k => k !== nativeRaw && allBalances[k]! > 0n);
+      if (customColors.length > 0) knownTokenColor = customColors[0];
+    }
+    const walletDisplay = await getWalletDisplayState(walletContext, knownTokenColor);
+    if (state) state.tokenColor = knownTokenColor ?? '';
+
     renderScreen({ role: 'user', state, contractAddress, wallet: walletDisplay, message });
     message = undefined;
 
@@ -227,30 +240,20 @@ async function userLoop(
       switch (choice) {
         case '1': {
           const balances = await api.getAllShieldedBalances(walletContext.wallet);
-          const entries = Object.entries(balances).filter(([, v]) => v > 0n);
+          const nativeRaw = nativeToken().raw;
+          const entries = Object.entries(balances).filter(([k, v]) => k !== nativeRaw && v > 0n);
           if (entries.length === 0) {
-            message = { text: 'No shielded token balances', type: 'info' };
+            message = { text: 'No shielded token balances found', type: 'info' };
           } else {
-            const balanceStr = entries.map(([color, val]) => `${color.substring(0, 16)}...: ${val}`).join(', ');
-            message = { text: `Shielded: ${balanceStr}`, type: 'info' };
+            const lines = entries.map(([color, val]) => `${color.substring(0, 20)}...: ${val}`);
+            message = { text: `Shielded tokens:\n${lines.join('\n')}`, type: 'info' };
           }
           break;
         }
-        case '2': {
-          const balances = await api.getAllShieldedBalances(walletContext.wallet);
-          const entries = Object.entries(balances).filter(([, v]) => v > 0n);
-          if (entries.length === 0) {
-            message = { text: 'No shielded balances', type: 'info' };
-          } else {
-            const lines = entries.map(([color, val]) => `  ${color.substring(0, 32)}...: ${val}`);
-            message = { text: `All shielded:\n${lines.join('\n')}`, type: 'info' };
-          }
-          break;
-        }
-        case '3':
+        case '2':
           message = { text: 'Refreshed', type: 'info' };
           break;
-        case '4':
+        case '3':
           clearScreen();
           console.log(`\n  ${c.dim}Session ended.${c.reset}\n`);
           return;
@@ -271,26 +274,25 @@ export const run = async (config: Config, _logger: Logger): Promise<void> => {
 
   clearScreen();
   console.log('');
-  console.log(`  ${c.cyan}+${'='.repeat(62)}+${c.reset}`);
-  console.log(`  ${c.cyan}|${c.bold}${' '.repeat(14)}MIDNIGHT SHIELDED TOKEN${' '.repeat(25)}${c.reset}${c.cyan}|${c.reset}`);
-  console.log(`  ${c.cyan}|${' '.repeat(14)}MNF Solutions Engineering${' '.repeat(23)}${c.cyan}|${c.reset}`);
-  console.log(`  ${c.cyan}+${'='.repeat(62)}+${c.reset}`);
+  console.log(`  ${c.cyan}+${'='.repeat(64)}+${c.reset}`);
+  console.log(`  ${c.cyan}|${c.bold}${'  MIDNIGHT TOKEN — SHIELDED & UNSHIELDED DEMO'.padEnd(64)}${c.reset}${c.cyan}|${c.reset}`);
+  console.log(`  ${c.cyan}|${c.reset}${'  MNF Solutions Engineering'.padEnd(64)}${c.cyan}|${c.reset}`);
+  console.log(`  ${c.cyan}+${'='.repeat(64)}+${c.reset}`);
   console.log('');
 
   const walletContext = await setupWallet(config);
 
   console.log(`\n  ${c.green}Wallet ready!${c.reset}`);
-  console.log(`    ${c.gray}Address:${c.reset}     ${walletContext.unshieldedKeystore.getBech32Address()}`);
+  console.log(`    ${c.gray}Address:${c.reset}  ${walletContext.unshieldedKeystore.getBech32Address()}`);
   console.log('');
 
   const providers = await withStatus('Configuring providers', () => api.configureProviders(walletContext, config));
 
-  // Deploy or join
   console.log('');
   console.log(`  ${c.white}Select action:${c.reset}`);
   console.log('');
-  console.log(`    ${c.cyan}1${c.reset}  Deploy a new Token contract`);
-  console.log(`    ${c.cyan}2${c.reset}  Join an existing Token contract`);
+  console.log(`    ${c.cyan}1${c.reset}  Deploy a new Token contract  ${c.dim}(you become the authority/owner)${c.reset}`);
+  console.log(`    ${c.cyan}2${c.reset}  Join an existing contract     ${c.dim}(enter contract address)${c.reset}`);
   console.log(`    ${c.cyan}3${c.reset}  Exit`);
   console.log('');
 
@@ -302,7 +304,7 @@ export const run = async (config: Config, _logger: Logger): Promise<void> => {
     const choice = await promptChoice();
     switch (choice) {
       case '1': {
-        const tokenName = await prompt('Token name (max 32 chars): ');
+        const tokenName = await prompt('Token name (max 32 chars, e.g. "gmoney"): ');
         if (!tokenName) {
           console.log(`    ${c.red}Token name cannot be empty${c.reset}`);
           continue;
@@ -317,7 +319,7 @@ export const run = async (config: Config, _logger: Logger): Promise<void> => {
         console.log(`\n    ${c.green}${c.bold}Contract deployed!${c.reset}`);
         console.log(`    ${c.gray}Address:${c.reset}    ${contractAddress}`);
         console.log(`    ${c.gray}Owner key:${c.reset}  ${Buffer.from(ownerSecretKey).toString('hex')}`);
-        console.log(`\n    ${c.yellow}${c.bold}Save the owner secret key to manage this contract later.${c.reset}\n`);
+        console.log(`\n    ${c.yellow}${c.bold}Save your owner secret key — you need it to mint tokens.${c.reset}\n`);
         break;
       }
       case '2': {
@@ -326,10 +328,10 @@ export const run = async (config: Config, _logger: Logger): Promise<void> => {
           console.log(`    ${c.red}Address cannot be empty${c.reset}`);
           continue;
         }
-        const skChoice = await prompt('Are you the owner? (y/n): ');
+        const skChoice = await prompt('Are you the token authority/owner? (y/n): ');
         let secretKey: Uint8Array;
         if (skChoice.toLowerCase() === 'y') {
-          const skHex = await prompt('Owner secret key (hex): ');
+          const skHex = await prompt('Owner secret key (64 hex chars): ');
           secretKey = new Uint8Array(Buffer.from(skHex, 'hex'));
           if (secretKey.length !== 32) {
             console.log(`    ${c.red}Secret key must be 32 bytes (64 hex chars)${c.reset}`);
