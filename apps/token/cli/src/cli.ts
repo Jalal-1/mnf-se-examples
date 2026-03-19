@@ -304,11 +304,8 @@ export const run = async (config: Config, _logger: Logger): Promise<void> => {
     const choice = await promptChoice();
     switch (choice) {
       case '1': {
-        const tokenName = await prompt('Token name (max 32 chars, e.g. "gmoney"): ');
-        if (!tokenName) {
-          console.log(`    ${c.red}Token name cannot be empty${c.reset}`);
-          continue;
-        }
+        const tokenNameInput = await prompt('Token name (max 32 chars, Enter for "mytoken"): ');
+        const tokenName = tokenNameInput || 'mytoken';
         const ownerSecretKey = api.randomBytes(32);
         const privateState: TokenPrivateState = { secretKey: ownerSecretKey };
         console.log(`\n    ${c.dim}Deploying contract (generating ZK proof)...${c.reset}`);
