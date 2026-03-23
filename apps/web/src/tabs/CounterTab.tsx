@@ -3,6 +3,13 @@ import { useWallet } from '../contexts/WalletContext.js';
 import * as counterApi from '../lib/counter-api.js';
 import type { DeployedCounterContract } from '../lib/counter-api.js';
 
+function extractError(e: unknown, depth = 0): string {
+  if (depth > 5) return '';
+  if (!(e instanceof Error)) return String(e);
+  const cause = e.cause ? ` → ${extractError(e.cause, depth + 1)}` : '';
+  return `${e.message}${cause}`;
+}
+
 interface Props {
   onLog: (message: string, type?: 'info' | 'success' | 'error') => void;
 }
@@ -37,8 +44,9 @@ export function CounterTab({ onLog }: Props) {
       await refreshState(addr);
       onLog(`Contract deployed at ${addr.substring(0, 20)}...`, 'success');
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = extractError(e);
       onLog(`Deploy failed: ${msg}`, 'error');
+      console.error('Deploy error:', e);
     } finally {
       setIsLoading(false);
       setLoadingMsg('');
@@ -57,8 +65,9 @@ export function CounterTab({ onLog }: Props) {
       await refreshState(joinAddress.trim());
       onLog('Successfully joined contract', 'success');
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = extractError(e);
       onLog(`Join failed: ${msg}`, 'error');
+      console.error('Join error:', e);
     } finally {
       setIsLoading(false);
       setLoadingMsg('');
@@ -76,8 +85,9 @@ export function CounterTab({ onLog }: Props) {
       await refreshState(contractAddress);
       onLog(`Counter incremented (tx: ${txId.substring(0, 16)}...)`, 'success');
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = extractError(e);
       onLog(`Increment failed: ${msg}`, 'error');
+      console.error('Increment error:', e);
     } finally {
       setIsLoading(false);
       setLoadingMsg('');

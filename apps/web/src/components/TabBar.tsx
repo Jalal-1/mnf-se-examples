@@ -8,12 +8,13 @@ export interface Tab {
 
 const TABS: Tab[] = [
   { id: 'counter', label: 'Counter', available: true },
-  { id: 'token', label: 'Token', available: false },
-  { id: 'election', label: 'Election', available: false },
-  { id: 'fungible-token', label: 'Fungible Token', available: false },
-  { id: 'nft', label: 'NFT', available: false },
-  { id: 'multi-token', label: 'Multi Token', available: false },
-  { id: 'access-control', label: 'Access Control', available: false },
+  { id: 'unshielded-utxo', label: 'Unshielded UTXO', available: true },
+  { id: 'shielded-utxo', label: 'Shielded UTXO', available: true },
+  { id: 'fungible-token', label: 'Fungible Token', available: true },
+  { id: 'nft', label: 'NFT', available: true },
+  { id: 'multi-token', label: 'Multi Token', available: true },
+  { id: 'access-control', label: 'Access Control', available: true },
+  { id: 'election', label: 'Election', available: true },
 ];
 
 interface Props {
@@ -35,16 +36,11 @@ export function TabBar({ activeTab, onTabChange }: Props) {
               ${
                 activeTab === tab.id
                   ? 'border-midnight-accent text-white'
-                  : tab.available
-                    ? 'border-transparent text-gray-400 hover:text-gray-200 hover:border-midnight-500'
-                    : 'border-transparent text-gray-600 cursor-default'
+                  : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-midnight-500'
               }
             `}
           >
             {tab.label}
-            {!tab.available && (
-              <span className="ml-1.5 text-[10px] text-gray-600 uppercase">soon</span>
-            )}
           </button>
         ))}
       </div>

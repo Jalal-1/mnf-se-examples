@@ -21,6 +21,7 @@ import type { NetworkConfig } from '../lib/config.js';
 import { applyNetworkId } from '../lib/config.js';
 import { buildCounterProvidersFromLace, buildCounterProvidersFromSeed } from '../lib/providers.js';
 import type { CounterProviders } from '../lib/counter-api.js';
+import type { SharedProviders } from '../lib/build-providers.js';
 import type { InitialWalletAPI } from '../hooks/useWalletDetection.js';
 import type { ShieldedAddresses } from '../lib/walletAdapter.js';
 
@@ -28,6 +29,7 @@ interface WalletState {
   mode: 'disconnected' | 'lace' | 'seed';
   network: NetworkConfig | null;
   providers: CounterProviders | null;
+  shared: SharedProviders | null;
   walletAddress: string;
   nightBalance: bigint;
   dustBalance: bigint;
@@ -55,6 +57,7 @@ const initialState: WalletState = {
   mode: 'disconnected',
   network: null,
   providers: null,
+  shared: null,
   walletAddress: '',
   nightBalance: 0n,
   dustBalance: 0n,
@@ -88,11 +91,19 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
       setStatus('Building providers...');
       const providers = await buildCounterProvidersFromLace(connectedAPI, shieldedAddresses, network);
+      const shared: SharedProviders = {
+        privateStateProvider: providers.privateStateProvider,
+        publicDataProvider: providers.publicDataProvider,
+        walletProvider: providers.walletProvider,
+        midnightProvider: providers.midnightProvider,
+        proofServerUrl: network.proofServer,
+      };
 
       setState({
         mode: 'lace',
         network,
         providers,
+        shared,
         walletAddress: unshieldedAddress,
         nightBalance: 0n,
         dustBalance: 0n,
@@ -170,6 +181,13 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       setStatus('Building providers...');
       const walletCtx: WalletCtx = { wallet, shieldedSecretKeys, dustSecretKey, unshieldedKeystore };
       const providers = await buildCounterProvidersFromSeed(walletCtx, network);
+      const shared: SharedProviders = {
+        privateStateProvider: providers.privateStateProvider,
+        publicDataProvider: providers.publicDataProvider,
+        walletProvider: providers.walletProvider,
+        midnightProvider: providers.midnightProvider,
+        proofServerUrl: network.proofServer,
+      };
 
       const finalState = await Rx.firstValueFrom(wallet.state());
       const finalNight = finalState.unshielded?.balances[nativeToken().raw] ?? 0n;
@@ -178,6 +196,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         mode: 'seed',
         network,
         providers,
+        shared,
         walletAddress: unshieldedKeystore.getBech32Address().toString(),
         nightBalance: finalNight,
         dustBalance: 0n,

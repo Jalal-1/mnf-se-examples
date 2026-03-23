@@ -11,6 +11,7 @@
     "./providers": "./src/providers.ts",
     "./rx-helpers": "./src/rx-helpers.ts",
     "./dust": "./src/dust.ts",
-    "./types": "./src/types.ts"
+    "./types": "./src/types.ts",
+    "./bmt-rehash": "./src/bmt-rehash.ts"
   }
 }

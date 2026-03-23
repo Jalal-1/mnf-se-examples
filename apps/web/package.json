@@ -11,6 +11,12 @@
   "dependencies": {
     "@mnf-se/common": "*",
     "@mnf-se/counter-contract": "*",
+    "@mnf-se/token-contract": "*",
+    "@mnf-se/fungible-token-contract": "*",
+    "@mnf-se/nft-contract": "*",
+    "@mnf-se/multi-token-contract": "*",
+    "@mnf-se/access-control-contract": "*",
+    "@mnf-se/election-contract": "*",
     "@midnight-ntwrk/dapp-connector-api": "4.0.1",
     "@midnight-ntwrk/midnight-js-fetch-zk-config-provider": "4.0.0-rc.2",
     "react": "^19.1.0",
