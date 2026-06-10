@@ -8,6 +8,8 @@ switch (networkArg) {
   case 'preprod':
     config = new PreprodConfig('access-control');
     break;
+  case 'undeployed':
+  case 'local':
   case 'standalone':
     config = new StandaloneConfig('access-control');
     break;

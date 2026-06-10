@@ -16,30 +16,36 @@ mnf-se-examples/
 
 **Package manager**: npm workspaces
 **Node.js**: >= 22.0.0
-**Compact compiler**: 0.29.0 (contracts use `pragma >= 0.20`)
+**Compact toolchain**: 0.31.0 (contracts use `pragma >= 0.20`)
 
 ## SDK Versions (stable, proven on preview + preprod)
 
 | Package | Version |
 |---|---|
-| @midnight-ntwrk/midnight-js-* | 3.0.0 |
-| @midnight-ntwrk/wallet-sdk-facade | 1.0.0 |
-| @midnight-ntwrk/wallet-sdk-hd | 3.0.0 |
-| @midnight-ntwrk/wallet-sdk-shielded | 1.0.0 |
-| @midnight-ntwrk/wallet-sdk-dust-wallet | 1.0.0 |
-| @midnight-ntwrk/wallet-sdk-unshielded-wallet | 1.0.0 |
-| @midnight-ntwrk/compact-runtime | 0.14.0 |
-| @midnight-ntwrk/compact-js | 2.4.0 |
-| @midnight-ntwrk/ledger (ledger-v7) | ^4.0.0 |
-| Docker: midnightntwrk/proof-server | 7.0.0 |
+| @midnight-ntwrk/midnight-js-* | 4.1.1 |
+| @midnight-ntwrk/testkit-js | 4.1.1 |
+| @midnight-ntwrk/dapp-connector-api | 4.0.1 |
+| @midnight-ntwrk/wallet-sdk-facade | 3.0.0 |
+| @midnight-ntwrk/wallet-sdk-hd | 3.0.1 |
+| @midnight-ntwrk/wallet-sdk-shielded | 2.1.0 |
+| @midnight-ntwrk/wallet-sdk-dust-wallet | 3.0.0 |
+| @midnight-ntwrk/wallet-sdk-unshielded-wallet | 2.1.0 |
+| @midnight-ntwrk/compact-runtime | 0.16.0 |
+| @midnight-ntwrk/compact-js | 2.5.1 |
+| @midnight-ntwrk/platform-js | 2.2.4 |
+| @midnight-ntwrk/onchain-runtime-v3 | 3.0.0 |
+| @midnight-ntwrk/ledger-v8 | 8.1.0 |
+| Docker: midnightntwrk/proof-server | 8.0.3 |
+
+`ledger-v8@8.1.0` is pinned to match `midnight-js-protocol@4.1.1`; the Preprod/Mainnet network rows in the compatibility matrix still list ledger `8.0.3` as the network component version.
 
 ## Network Endpoints
 
 | Network | Indexer | RPC Node | Proof Server |
 |---|---|---|---|
-| Preview | https://indexer.preview.midnight.network/api/v3/graphql | https://rpc.preview.midnight.network | localhost:6300 |
-| Preprod | https://indexer.preprod.midnight.network/api/v3/graphql | https://rpc.preprod.midnight.network | localhost:6300 |
-| Standalone | http://127.0.0.1:8088/api/v3/graphql | http://127.0.0.1:9944 | localhost:6300 |
+| Preview | https://indexer.preview.midnight.network/api/v4/graphql | https://rpc.preview.midnight.network | localhost:6300 |
+| Preprod | https://indexer.preprod.midnight.network/api/v4/graphql | https://rpc.preprod.midnight.network | localhost:6300 |
+| Standalone/undeployed | http://127.0.0.1:8088/api/v4/graphql | http://127.0.0.1:9944 | localhost:6300 |
 
 Preview is faster for iteration (more peers, faster sync). Use preprod for final testing.
 
@@ -50,7 +56,7 @@ All wallet, provider, and utility code lives in `packages/common/src/`:
 | File | Exports | Purpose |
 |---|---|---|
 | `wallet.ts` | `buildWalletAndWaitForFunds()`, `buildFreshWallet()`, `deriveKeysFromSeed()` | HD wallet lifecycle: derive keys, create 3 sub-wallets (Shielded, Unshielded, Dust), sync, fund, register DUST |
-| `providers.ts` | `createWalletAndMidnightProvider()` | Bridges wallet-sdk-facade to midnight-js contract API. Includes signRecipe workaround for wallet-sdk 1.0.0 bug |
+| `providers.ts` | `createWalletAndMidnightProvider()` | Bridges wallet-sdk-facade to midnight-js contract API using the facade balance/finalize/submit flow |
 | `config.ts` | `Config`, `PreviewConfig`, `PreprodConfig`, `StandaloneConfig` | Network endpoint configuration. Constructor calls `setNetworkId()` |
 | `dust.ts` | `registerForDustGeneration()`, `getDustBalance()`, `monitorDustBalance()` | DUST token lifecycle: register NIGHT UTXOs, wait for generation, monitor balance |
 | `rx-helpers.ts` | `waitForSync()`, `waitForFunds()` | RxJS observable patterns for wallet state |
@@ -98,7 +104,7 @@ import { createLogger, PreviewConfig } from '@mnf-se/common';
 2. Write the `.compact` contract in `apps/<name>/contract/src/<name>.compact`
 3. Implement witnesses in `witnesses.ts`
 4. Update `index.ts` to re-export managed contract + witnesses
-5. Compile: `cd apps/<name>/contract && npm run compact && npm run build`
+5. Compile: `cd apps/<name>/contract && npm run compact && npm run build` (`compact compile +0.31.0`)
 6. Define circuit types in `cli/src/types.ts`
 7. Implement contract operations in `cli/src/api.ts`
 8. Build the interactive menu in `cli/src/cli.ts`
@@ -199,7 +205,7 @@ export ledger eligible_voters: MerkleTree<10, Bytes<32>>;
 
 ## Common Pitfalls
 
-1. **signRecipe bug** (wallet-sdk 1.0.0): `signRecipe()` hardcodes `'pre-proof'` marker for all intents, but proven intents use `'proof'`. The `createWalletAndMidnightProvider()` in `@mnf-se/common` includes the workaround.
+1. **Old signRecipe workaround**: Older wallet SDKs needed manual intent signing for proven intents. The current `wallet-sdk-facade@3.0.0` flow does not need that workaround; avoid reintroducing it unless testing an older SDK line.
 
 2. **BMT rehash**: Contracts with `MerkleTree<N,T>` ledger state crash with "attempted to take root of non-rehashed bmt" unless you wrap the PublicDataProvider with `wrapPublicDataProviderWithRehash()`.
 

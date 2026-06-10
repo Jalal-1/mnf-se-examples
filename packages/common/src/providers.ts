@@ -10,7 +10,7 @@ import type { WalletContext } from './types.js';
  * This bridges the wallet-sdk-facade to the midnight-js contract API by
  * implementing balance, sign, finalize, and submit operations.
  *
- * wallet-sdk 2.0.0 fixes the signRecipe bug from 1.0.0, so no manual
+ * wallet-sdk-facade 3.0.0 fixes the old signRecipe bug, so no manual
  * intent signing workaround is needed.
  */
 export const createWalletAndMidnightProvider = async (

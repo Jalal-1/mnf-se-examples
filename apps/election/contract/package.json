@@ -13,7 +13,7 @@
     }
   },
   "scripts": {
-    "compact": "compact compile src/election.compact src/managed/election",
+    "compact": "compact compile +0.31.0 src/election.compact src/managed/election",
     "build": "rm -rf dist && tsc --project tsconfig.build.json && cp -Rf ./src/managed ./dist/managed && cp ./src/election.compact ./dist",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   }

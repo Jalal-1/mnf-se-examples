@@ -33,7 +33,7 @@ Supports two wallet modes:
 
 - [Node.js v22+](https://nodejs.org/)
 - [Docker](https://docs.docker.com/get-docker/) with `docker compose`
-- [Compact compiler](https://github.com/midnightntwrk/compact) (`compact update 0.30.0-rc.1`)
+- [Compact devtools](https://github.com/midnightntwrk/compact) with toolchain `0.31.0` (`compact update 0.31.0`)
 
 ## Quick Start
 
@@ -64,13 +64,13 @@ npm run web
 
 | Command | Description |
 |---------|-------------|
-| `npm run counter` | Run counter on local testnet |
-| `npm run token` | Run shielded token on local testnet |
-| `npm run election` | Run election on local testnet |
-| `npm run fungible-token` | Run fungible token (ERC20) on local testnet |
-| `npm run nft` | Run NFT (ERC721) on local testnet |
-| `npm run multi-token` | Run multi token (ERC1155) on local testnet |
-| `npm run access-control` | Run access control on local testnet |
+| `npm run counter` | Run counter on local undeployed network |
+| `npm run token` | Run shielded token on local undeployed network |
+| `npm run election` | Run election on local undeployed network |
+| `npm run fungible-token` | Run fungible token (ERC20) on local undeployed network |
+| `npm run nft` | Run NFT (ERC721) on local undeployed network |
+| `npm run multi-token` | Run multi token (ERC1155) on local undeployed network |
+| `npm run access-control` | Run access control on local undeployed network |
 
 ### Run Apps (Testnet)
 
@@ -78,6 +78,7 @@ For preview/preprod, start the proof server locally then run with the network su
 
 ```bash
 npm run docker:proof           # Proof server only (for testnet)
+npm run counter:undeployed     # Local undeployed network
 npm run counter:preview        # Preview network
 npm run counter:preprod        # Preprod network
 ```
@@ -114,20 +115,27 @@ Fund your wallet from the [Preview faucet](https://faucet.preview.midnight.netwo
 
 | Package | Version |
 |---------|---------|
-| Compact compiler | 0.30.0-rc.1 |
-| compact-runtime | 0.15.0 |
-| compact-js | 2.5.0-rc.3 |
-| midnight-js-* | 4.0.0-rc.2 |
-| wallet-sdk-facade | 3.0.0-rc.0 |
-| ledger-v8 | 8.0.3-rc.1 |
+| Compact devtools | 0.5.1 |
+| Compact toolchain | 0.31.0 |
+| compact-runtime | 0.16.0 |
+| compact-js | 2.5.1 |
+| platform-js | 2.2.4 |
+| onchain-runtime-v3 | 3.0.0 |
+| midnight-js-* | 4.1.1 |
+| testkit-js | 4.1.1 |
+| dapp-connector-api | 4.0.1 |
+| wallet-sdk-facade | 3.0.0 |
+| ledger-v8 | 8.1.0 |
+
+The JS dependency graph pins `ledger-v8@8.1.0` to match `midnight-js-protocol@4.1.1`. The Preprod network row in the compatibility matrix still lists ledger `8.0.3` as the network component version.
 
 ## Docker Images (Standalone)
 
 | Image | Version |
 |-------|---------|
-| midnight-node | 0.22.2 |
-| indexer-standalone | 4.0.0 |
-| proof-server | 8.0.2 |
+| midnight-node | 0.22.5 |
+| indexer-standalone | 4.0.1 |
+| proof-server | 8.0.3 |
 
 ## Project Structure
 
@@ -161,7 +169,7 @@ See [CLAUDE.md](CLAUDE.md) for detailed instructions on the per-app pattern and 
 ## Known Issues
 
 - **mintUnshieldedToken error 186**: Unshielded token minting fails when `assert` is used in the same circuit. Known upstream issue — see [compact#235](https://github.com/LFDT-Minokawa/compact/issues/235).
-- **BMT rehash**: Contracts with `MerkleTree` state require the `compact-js` patch (applied automatically via `patch-package` on `npm install`).
+- **BMT rehash**: Contracts with `MerkleTree` state should use `wrapPublicDataProviderWithRehash()` from `@mnf-se/common`.
 
 ## License
 

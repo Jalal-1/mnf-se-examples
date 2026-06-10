@@ -13,7 +13,7 @@
     }
   },
   "scripts": {
-    "compact": "compact compile src/token.compact src/managed/token",
+    "compact": "compact compile +0.31.0 src/token.compact src/managed/token",
     "build": "rm -rf dist && tsc --project tsconfig.build.json && cp -Rf ./src/managed ./dist/managed && cp ./src/token.compact ./dist",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   }

@@ -8,6 +8,8 @@ switch (networkArg) {
   case 'preprod':
     config = new PreprodConfig('election');
     break;
+  case 'undeployed':
+  case 'local':
   case 'standalone':
     config = new StandaloneConfig('election');
     break;

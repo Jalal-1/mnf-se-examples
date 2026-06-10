@@ -53,7 +53,7 @@ export default defineConfig({
       '/check': { target: 'http://127.0.0.1:6300', changeOrigin: true },
       '/version': { target: 'http://127.0.0.1:6300', changeOrigin: true },
       // Indexer GraphQL HTTP (WebSocket goes direct, no CORS issue)
-      '/api/v3': { target: 'http://127.0.0.1:8088', changeOrigin: true },
+      '/api/v4': { target: 'http://127.0.0.1:8088', changeOrigin: true },
     },
   },
 });

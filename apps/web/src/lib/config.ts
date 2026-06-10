@@ -10,31 +10,31 @@ export interface NetworkConfig {
 }
 
 // In dev, Vite proxies /prove, /check, /version → proof-server:6300
-// and /api/v3/* → indexer:8088 to avoid CORS issues.
+// and /api/v4/* -> indexer:8088 to avoid CORS issues.
 const DEV_ORIGIN = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5173';
 
 export const NETWORKS: Record<string, NetworkConfig> = {
   standalone: {
     name: 'Standalone',
     networkId: 'undeployed',
-    indexer: `${DEV_ORIGIN}/api/v3/graphql`,
-    indexerWS: 'ws://127.0.0.1:8088/api/v3/graphql/ws',
+    indexer: `${DEV_ORIGIN}/api/v4/graphql`,
+    indexerWS: 'ws://127.0.0.1:8088/api/v4/graphql/ws',
     node: 'ws://127.0.0.1:9944',
     proofServer: DEV_ORIGIN,
   },
   preview: {
     name: 'Preview',
     networkId: 'preview',
-    indexer: 'https://indexer.preview.midnight.network/api/v3/graphql',
-    indexerWS: 'wss://indexer.preview.midnight.network/api/v3/graphql/ws',
+    indexer: 'https://indexer.preview.midnight.network/api/v4/graphql',
+    indexerWS: 'wss://indexer.preview.midnight.network/api/v4/graphql/ws',
     node: 'https://rpc.preview.midnight.network',
     proofServer: 'http://127.0.0.1:6300',
   },
   preprod: {
     name: 'Preprod',
     networkId: 'preprod',
-    indexer: 'https://indexer.preprod.midnight.network/api/v3/graphql',
-    indexerWS: 'wss://indexer.preprod.midnight.network/api/v3/graphql/ws',
+    indexer: 'https://indexer.preprod.midnight.network/api/v4/graphql',
+    indexerWS: 'wss://indexer.preprod.midnight.network/api/v4/graphql/ws',
     node: 'https://rpc.preprod.midnight.network',
     proofServer: 'http://127.0.0.1:6300',
   },

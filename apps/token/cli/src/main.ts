@@ -8,6 +8,8 @@ switch (networkArg) {
   case 'preprod':
     config = new PreprodConfig('token');
     break;
+  case 'undeployed':
+  case 'local':
   case 'standalone':
     config = new StandaloneConfig('token');
     break;

@@ -18,7 +18,7 @@
     "@mnf-se/access-control-contract": "*",
     "@mnf-se/election-contract": "*",
     "@midnight-ntwrk/dapp-connector-api": "4.0.1",
-    "@midnight-ntwrk/midnight-js-fetch-zk-config-provider": "4.0.0-rc.2",
+    "@midnight-ntwrk/midnight-js-fetch-zk-config-provider": "4.1.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "level": "^10.0.0",

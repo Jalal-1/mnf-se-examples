@@ -6,6 +6,7 @@
   "scripts": {
     "preview": "node --experimental-specifier-resolution=node --loader ts-node/esm src/main.ts -- --network preview",
     "preprod": "node --experimental-specifier-resolution=node --loader ts-node/esm src/main.ts -- --network preprod",
+    "undeployed": "node --experimental-specifier-resolution=node --loader ts-node/esm src/main.ts -- --network undeployed",
     "standalone": "node --experimental-specifier-resolution=node --loader ts-node/esm src/main.ts -- --network standalone",
     "build": "rm -rf dist && tsc --project tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit"

@@ -12,6 +12,9 @@ function timingSafeEqual(a: Buffer | Uint8Array, b: Buffer | Uint8Array): boolea
   return result === 0;
 }
 
+const webcrypto = globalThis.crypto;
+const subtle = globalThis.crypto?.subtle;
+
 const {
   Cipher, Cipheriv, Decipher, Decipheriv, DiffieHellman, DiffieHellmanGroup,
   Hash, Hmac, Sign, Verify, constants,
@@ -30,7 +33,7 @@ export {
   createSign, createVerify, getCiphers, getDiffieHellman, getHashes, listCiphers,
   pbkdf2, pbkdf2Sync, privateDecrypt, privateEncrypt, prng, pseudoRandomBytes,
   publicDecrypt, publicEncrypt, randomBytes, randomFill, randomFillSync, rng,
-  timingSafeEqual,
+  subtle, timingSafeEqual, webcrypto,
 };
 
-export default { ...cryptoBrowserify, timingSafeEqual };
+export default { ...cryptoBrowserify, subtle, timingSafeEqual, webcrypto };
