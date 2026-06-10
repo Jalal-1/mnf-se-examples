@@ -103,6 +103,8 @@ Fund your wallet from the [Preview faucet](https://faucet.preview.midnight.netwo
 | `npm run docker:reset` | Wipe all state and restart fresh |
 | `npm run docker:proof` | Start proof server only (for preview/preprod) |
 
+`docker:up` and `docker:proof` run a preflight that stops other Docker containers already publishing the local Midnight ports (`6300`, `8088`, `9944`) before recreating this repo's stack.
+
 ### Build
 
 | Command | Description |
