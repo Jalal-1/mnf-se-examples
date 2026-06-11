@@ -16,6 +16,7 @@ Deployable apps and an AI coding knowledge base for building Midnight DApps.
 | [**multi-token**](apps/multi-token/) | ERC1155-like multi token | OZ MultiToken, batch mint/transfer, mixed fungible/NFT | Working |
 | [**access-control**](apps/access-control/) | Role-based access control | OZ AccessControl, Pausable, role grants/revokes | Working |
 | [**multisig**](apps/multisig/) | Guided key ceremony + 2-of-3 Schnorr multisig | Jubjub keys, Schnorr signatures, proposal approvals | Working |
+| [**multisig-token**](apps/multisig-token/) | Multisig-controlled shielded token mint | ZSwap minting, token names, Schnorr approvals, wallet/contract recipients | Working |
 
 ## Web UI
 
@@ -55,6 +56,7 @@ npm run counter
 npm run token
 npm run election
 npm run multisig
+npm run multisig-token
 
 # Or launch the web UI
 npm run web
@@ -74,6 +76,7 @@ npm run web
 | `npm run multi-token` | Run multi token (ERC1155) on local undeployed network |
 | `npm run access-control` | Run access control on local undeployed network |
 | `npm run multisig` | Run guided key ceremony + Schnorr multisig on local undeployed network |
+| `npm run multisig-token` | Run multisig-controlled shielded token mint on local undeployed network |
 
 ### Run Apps (Testnet)
 
@@ -86,6 +89,8 @@ npm run counter:preview        # Preview network
 npm run counter:preprod        # Preprod network
 npm run multisig:preview       # Preview network
 npm run multisig:preprod       # Preprod network
+npm run multisig-token:preview # Preview network
+npm run multisig-token:preprod # Preprod network
 ```
 
 Fund your wallet from the [Preview faucet](https://faucet.preview.midnight.network) or [Preprod faucet](https://faucet.preprod.midnight.network).
@@ -117,6 +122,7 @@ Fund your wallet from the [Preview faucet](https://faucet.preview.midnight.netwo
 | `npm run build:all` | Compile all Compact contracts + TypeScript |
 | `npm run build:counter` | Compile counter contract only |
 | `npm run build:multisig` | Compile Schnorr multisig contract only |
+| `npm run build:multisig-token` | Compile multisig shielded token mint contract only |
 | `npm run typecheck` | Type-check all CLI code |
 
 ## SDK Versions
@@ -163,6 +169,7 @@ mnf-se-examples/
 ├── apps/multi-token/       # ERC1155-like multi token
 ├── apps/access-control/    # Role-based access control + Pausable
 ├── apps/multisig/          # Guided key ceremony + 2-of-3 Schnorr multisig
+├── apps/multisig-token/    # Multisig-controlled shielded token mint
 ├── apps/web/               # React web UI (Vite + Tailwind)
 ├── docker/                 # Docker Compose files
 │   ├── proof-server.yml    # Proof server only (for preview/preprod)

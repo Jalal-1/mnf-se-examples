@@ -55,6 +55,7 @@
     "multi-token": "npm -w @mnf-se/multi-token-cli run standalone",
     "access-control": "npm -w @mnf-se/access-control-cli run standalone",
     "multisig": "npm -w @mnf-se/multisig-cli run standalone",
+    "multisig-token": "npm -w @mnf-se/multisig-token-cli run standalone",
     "counter:undeployed": "npm -w @mnf-se/counter-cli run undeployed",
     "token:undeployed": "npm -w @mnf-se/token-cli run undeployed",
     "election:undeployed": "npm -w @mnf-se/election-cli run undeployed",
@@ -63,6 +64,7 @@
     "multi-token:undeployed": "npm -w @mnf-se/multi-token-cli run undeployed",
     "access-control:undeployed": "npm -w @mnf-se/access-control-cli run undeployed",
     "multisig:undeployed": "npm -w @mnf-se/multisig-cli run undeployed",
+    "multisig-token:undeployed": "npm -w @mnf-se/multisig-token-cli run undeployed",
     "counter:preview": "npm -w @mnf-se/counter-cli run preview",
     "counter:preprod": "npm -w @mnf-se/counter-cli run preprod",
     "token:preview": "npm -w @mnf-se/token-cli run preview",
@@ -79,6 +81,8 @@
     "access-control:preprod": "npm -w @mnf-se/access-control-cli run preprod",
     "multisig:preview": "npm -w @mnf-se/multisig-cli run preview",
     "multisig:preprod": "npm -w @mnf-se/multisig-cli run preprod",
+    "multisig-token:preview": "npm -w @mnf-se/multisig-token-cli run preview",
+    "multisig-token:preprod": "npm -w @mnf-se/multisig-token-cli run preprod",
     "web": "npm -w @mnf-se/web run dev",
     "web:build": "npm -w @mnf-se/web run build",
     "web:preview": "npm -w @mnf-se/web run preview",
@@ -90,8 +94,9 @@
     "build:multi-token": "cd apps/multi-token/contract && npm run compact && npm run build",
     "build:access-control": "cd apps/access-control/contract && npm run compact && npm run build",
     "build:multisig": "cd apps/multisig/contract && npm run compact && npm run build",
-    "build:all": "npm run build:counter && npm run build:token && npm run build:election && npm run build:fungible-token && npm run build:nft && npm run build:multi-token && npm run build:access-control && npm run build:multisig",
-    "typecheck": "npx tsc -p apps/counter/cli/tsconfig.json --noEmit && npx tsc -p apps/token/cli/tsconfig.json --noEmit && npx tsc -p apps/election/cli/tsconfig.json --noEmit && npx tsc -p apps/fungible-token/cli/tsconfig.json --noEmit && npx tsc -p apps/nft/cli/tsconfig.json --noEmit && npx tsc -p apps/multi-token/cli/tsconfig.json --noEmit && npx tsc -p apps/access-control/cli/tsconfig.json --noEmit && npx tsc -p apps/multisig/cli/tsconfig.json --noEmit"
+    "build:multisig-token": "cd apps/multisig-token/contract && npm run compact && npm run build",
+    "build:all": "npm run build:counter && npm run build:token && npm run build:election && npm run build:fungible-token && npm run build:nft && npm run build:multi-token && npm run build:access-control && npm run build:multisig && npm run build:multisig-token",
+    "typecheck": "npx tsc -p apps/counter/cli/tsconfig.json --noEmit && npx tsc -p apps/token/cli/tsconfig.json --noEmit && npx tsc -p apps/election/cli/tsconfig.json --noEmit && npx tsc -p apps/fungible-token/cli/tsconfig.json --noEmit && npx tsc -p apps/nft/cli/tsconfig.json --noEmit && npx tsc -p apps/multi-token/cli/tsconfig.json --noEmit && npx tsc -p apps/access-control/cli/tsconfig.json --noEmit && npx tsc -p apps/multisig/cli/tsconfig.json --noEmit && npx tsc -p apps/multisig-token/cli/tsconfig.json --noEmit"
   },
   "devDependencies": {
     "@types/node": "^25.3.2",

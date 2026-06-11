@@ -1,0 +1,279 @@
+// SPDX-License-Identifier: Apache-2.0
+
+pragma language_version >= 0.21.0;
+
+import CompactStandardLibrary;
+
+import "./Jubjub" prefix Jubjub_;
+import "./Schnorr" prefix Schnorr_;
+
+export { ZswapCoinPublicKey, ContractAddress, Schnorr_JubjubSchnorrSignature };
+
+export enum ProposalStatus {
+  Inactive,
+  Active,
+  Executed
+}
+
+export struct MintProposal {
+  amount: Uint<16>,
+  recipient: Either<ZswapCoinPublicKey, ContractAddress>,
+  status: ProposalStatus
+}
+
+export struct MintProposalView {
+  amount: Uint<16>,
+  recipient: Either<ZswapCoinPublicKey, ContractAddress>,
+  status: ProposalStatus,
+  approvals: Uint<8>
+}
+
+export struct ContractSummary {
+  tokenName: Bytes<32>,
+  domainSeparator: Bytes<32>,
+  tokenColor: Bytes<32>,
+  shieldedSupply: Uint<64>,
+  signerCount: Uint<8>,
+  threshold: Uint<8>,
+  nextProposalId: Uint<64>,
+  executedCount: Uint<64>,
+  instanceSalt: Bytes<32>
+}
+
+export ledger _tokenName: Bytes<32>;
+export ledger _domainSeparator: Bytes<32>;
+export ledger _shieldedSupply: Counter;
+export ledger _instanceSalt: Bytes<32>;
+export ledger _signers: Set<JubjubPoint>;
+export ledger _signerCount: Uint<8>;
+export ledger _threshold: Uint<8>;
+export ledger _nextProposalId: Counter;
+export ledger _mintProposals: Map<Uint<64>, MintProposal>;
+export ledger _proposalApprovals: Map<Uint<64>, Map<JubjubPoint, Boolean>>;
+export ledger _approvalCount: Map<Uint<64>, Uint<8>>;
+export ledger _executedCount: Counter;
+
+witness local$nonce(): Bytes<32>;
+
+constructor(
+  tokenName: Bytes<32>,
+  signerPubkeys: Vector<3, JubjubPoint>,
+  threshold: Uint<8>,
+  instanceSalt: Bytes<32>
+) {
+  assert(tokenName != default<Bytes<32>>, "MultisigToken: token name is required");
+  assert(threshold > 0, "MultisigToken: threshold must be > 0");
+  assert(threshold <= 3, "MultisigToken: threshold cannot exceed signer count");
+
+  _tokenName = disclose(tokenName);
+  _domainSeparator = disclose(tokenName);
+  _instanceSalt = disclose(instanceSalt);
+
+  for (const signer of signerPubkeys) {
+    _addSigner(signer);
+  }
+
+  _threshold = disclose(threshold);
+}
+
+pure circuit mintApprovalMessageHash(
+  instanceSalt: Bytes<32>,
+  proposalId: Uint<64>,
+  domainSeparator: Bytes<32>,
+  recipient: Either<ZswapCoinPublicKey, ContractAddress>,
+  amount: Uint<16>
+): Bytes<32> {
+  const canonicalRecipient = canonicalizeRecipient(recipient);
+  return persistentHash<Vector<7, Bytes<32>>>([
+    pad(32, "MNF:MSMint:v1"),
+    instanceSalt,
+    proposalId as Bytes<32>,
+    domainSeparator,
+    recipientTag(canonicalRecipient),
+    recipientBytes(canonicalRecipient),
+    amount as Bytes<32>
+  ]);
+}
+
+pure circuit recipientTag(
+  recipient: Either<ZswapCoinPublicKey, ContractAddress>
+): Bytes<32> {
+  if (recipient.is_left) {
+    return pad(32, "ZswapCoinPublicKey");
+  }
+  return pad(32, "ContractAddress");
+}
+
+pure circuit recipientBytes(
+  recipient: Either<ZswapCoinPublicKey, ContractAddress>
+): Bytes<32> {
+  if (recipient.is_left) {
+    return recipient.left.bytes;
+  }
+  return recipient.right.bytes;
+}
+
+pure circuit canonicalizeRecipient(
+  recipient: Either<ZswapCoinPublicKey, ContractAddress>
+): Either<ZswapCoinPublicKey, ContractAddress> {
+  if (recipient.is_left) {
+    return left<ZswapCoinPublicKey, ContractAddress>(recipient.left);
+  }
+  return right<ZswapCoinPublicKey, ContractAddress>(recipient.right);
+}
+
+pure circuit mintActionHash(
+  domainSeparator: Bytes<32>,
+  recipient: Either<ZswapCoinPublicKey, ContractAddress>,
+  amount: Uint<16>
+): Bytes<32> {
+  const canonicalRecipient = canonicalizeRecipient(recipient);
+  return persistentHash<Vector<5, Bytes<32>>>([
+    pad(32, "MNF:MintAction:v1"),
+    domainSeparator,
+    recipientTag(canonicalRecipient),
+    recipientBytes(canonicalRecipient),
+    amount as Bytes<32>
+  ]);
+}
+
+export circuit createMintProposal(
+  amount: Uint<16>,
+  recipient: Either<ZswapCoinPublicKey, ContractAddress>
+): Uint<64> {
+  assert(disclose(amount) > 0, "MultisigToken: amount must be greater than zero");
+  const canonicalRecipient = canonicalizeRecipient(recipient);
+  assert(
+    recipientBytes(canonicalRecipient) != default<Bytes<32>>,
+    "MultisigToken: recipient must not be zero"
+  );
+
+  _nextProposalId.increment(1);
+  const id = _nextProposalId;
+
+  _mintProposals.insert(id, disclose(MintProposal {
+    amount: amount,
+    recipient: canonicalRecipient,
+    status: ProposalStatus.Active
+  }));
+
+  return id;
+}
+
+export circuit approveMintProposal(
+  id: Uint<64>,
+  signer: JubjubPoint,
+  signature: Schnorr_JubjubSchnorrSignature
+): [] {
+  assertProposalActive(id);
+  assertSigner(signer);
+  assert(!isProposalApprovedBySigner(id, signer), "MultisigToken: already approved");
+
+  const proposal = _mintProposals.lookup(disclose(id));
+  const messageHash = mintApprovalMessageHash(
+    _instanceSalt,
+    id,
+    _domainSeparator,
+    proposal.recipient,
+    proposal.amount
+  );
+  Schnorr_assertValid(signer, messageHash, signature);
+
+  if (!_proposalApprovals.member(disclose(id))) {
+    _proposalApprovals.insert(disclose(id), default<Map<JubjubPoint, Boolean>>);
+  }
+
+  _proposalApprovals.lookup(disclose(id)).insert(disclose(signer), disclose(true));
+  _approvalCount.insert(disclose(id), disclose(getApprovalCount(id) + 1 as Uint<8>));
+}
+
+export circuit executeMintProposal(id: Uint<64>): ShieldedCoinInfo {
+  assertProposalActive(id);
+  assert(getApprovalCount(id) >= _threshold, "MultisigToken: threshold not met");
+
+  const proposal = _mintProposals.lookup(disclose(id));
+  _mintProposals.insert(disclose(id), disclose(MintProposal {
+    amount: proposal.amount,
+    recipient: proposal.recipient,
+    status: ProposalStatus.Executed
+  }));
+  _executedCount.increment(1);
+  _shieldedSupply.increment(proposal.amount);
+
+  return mintShieldedToken(
+    _domainSeparator,
+    proposal.amount,
+    disclose(local$nonce()),
+    proposal.recipient
+  );
+}
+
+export circuit getSummary(): ContractSummary {
+  return ContractSummary {
+    tokenName: _tokenName,
+    domainSeparator: _domainSeparator,
+    tokenColor: tokenType(_domainSeparator, kernel.self()),
+    shieldedSupply: _shieldedSupply,
+    signerCount: _signerCount,
+    threshold: _threshold,
+    nextProposalId: _nextProposalId,
+    executedCount: _executedCount,
+    instanceSalt: _instanceSalt
+  };
+}
+
+export circuit getMintProposalView(id: Uint<64>): MintProposalView {
+  assertProposalExists(id);
+  const proposal = _mintProposals.lookup(disclose(id));
+  return MintProposalView {
+    amount: proposal.amount,
+    recipient: proposal.recipient,
+    status: proposal.status,
+    approvals: getApprovalCount(id)
+  };
+}
+
+circuit getApprovalCount(id: Uint<64>): Uint<8> {
+  if (!_approvalCount.member(disclose(id))) {
+    return 0;
+  }
+  return _approvalCount.lookup(disclose(id));
+}
+
+circuit isProposalApprovedBySigner(id: Uint<64>, signer: JubjubPoint): Boolean {
+  if (!_proposalApprovals.member(disclose(id))) {
+    return false;
+  }
+  if (!_proposalApprovals.lookup(disclose(id)).member(disclose(signer))) {
+    return false;
+  }
+  return _proposalApprovals.lookup(disclose(id)).lookup(disclose(signer));
+}
+
+circuit isSigner(signer: JubjubPoint): Boolean {
+  return _signers.member(disclose(signer));
+}
+
+circuit _addSigner(signer: JubjubPoint): [] {
+  Jubjub_assertNonIdentity(signer);
+  assert(!isSigner(signer), "MultisigToken: duplicate signer");
+  _signers.insert(disclose(signer));
+  _signerCount = _signerCount + 1 as Uint<8>;
+}
+
+circuit assertSigner(signer: JubjubPoint): [] {
+  Jubjub_assertNonIdentity(signer);
+  assert(isSigner(signer), "MultisigToken: not a signer");
+}
+
+circuit assertProposalExists(id: Uint<64>): [] {
+  assert(_mintProposals.member(disclose(id)), "MultisigToken: proposal not found");
+}
+
+circuit assertProposalActive(id: Uint<64>): [] {
+  assertProposalExists(id);
+  assert(
+    _mintProposals.lookup(disclose(id)).status == ProposalStatus.Active,
+    "MultisigToken: proposal not active"
+  );
+}

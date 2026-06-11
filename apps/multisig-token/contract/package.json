@@ -1,0 +1,13 @@
+{
+  "name": "@mnf-se/multisig-token-contract",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "compact": "compact compile +0.31.0 src/multisig-token.compact src/managed/multisig-token",
+    "build": "rm -rf dist && tsc --project tsconfig.build.json && cp -Rf ./src/managed ./dist/managed && cp ./src/multisig-token.compact ./dist && cp ./src/Jubjub.compact ./dist && cp ./src/Schnorr.compact ./dist",
+    "typecheck": "tsc --noEmit"
+  }
+}

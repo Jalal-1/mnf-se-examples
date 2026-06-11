@@ -1,0 +1,20 @@
+{
+  "name": "@mnf-se/multisig-token-cli",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "mnf-multisig-token": "dist/main.js"
+  },
+  "scripts": {
+    "standalone": "node --loader ts-node/esm src/main.ts standalone",
+    "undeployed": "node --loader ts-node/esm src/main.ts undeployed",
+    "preview": "node --loader ts-node/esm src/main.ts preview",
+    "preprod": "node --loader ts-node/esm src/main.ts preprod",
+    "build": "rm -rf dist && tsc --project tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@mnf-se/multisig-token-contract": "*"
+  }
+}
