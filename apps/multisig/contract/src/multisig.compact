@@ -1,0 +1,196 @@
+// SPDX-License-Identifier: Apache-2.0
+
+pragma language_version >= 0.21.0;
+
+import CompactStandardLibrary;
+
+import "./Jubjub" prefix Jubjub_;
+import "./Schnorr" prefix Schnorr_;
+
+export { Schnorr_JubjubSchnorrSignature };
+
+export enum ProposalStatus {
+  Inactive,
+  Active,
+  Executed
+}
+
+export struct Proposal {
+  actionHash: Bytes<32>,
+  status: ProposalStatus
+}
+
+export ledger _instanceSalt: Bytes<32>;
+export ledger _signers: Set<JubjubPoint>;
+export ledger _signerCount: Uint<8>;
+export ledger _threshold: Uint<8>;
+export ledger _nextProposalId: Counter;
+export ledger _proposals: Map<Uint<64>, Proposal>;
+export ledger _proposalApprovals: Map<Uint<64>, Map<JubjubPoint, Boolean>>;
+export ledger _approvalCount: Map<Uint<64>, Uint<8>>;
+export ledger _executedCount: Counter;
+
+constructor(
+  signerPubkeys: Vector<3, JubjubPoint>,
+  threshold: Uint<8>,
+  instanceSalt: Bytes<32>
+) {
+  assert(threshold > 0, "Multisig: threshold must be > 0");
+  assert(threshold <= 3, "Multisig: threshold cannot exceed signer count");
+
+  _instanceSalt = disclose(instanceSalt);
+
+  for (const signer of signerPubkeys) {
+    _addSigner(signer);
+  }
+
+  _threshold = disclose(threshold);
+}
+
+export pure circuit approvalMessageHash(
+  instanceSalt: Bytes<32>,
+  proposalId: Uint<64>,
+  actionHash: Bytes<32>
+): Bytes<32> {
+  return persistentHash<Vector<4, Bytes<32>>>([
+    pad(32, "MNF:SchnorrMS:v1"),
+    instanceSalt,
+    proposalId as Bytes<32>,
+    actionHash
+  ]);
+}
+
+export circuit createProposal(actionHash: Bytes<32>): Uint<64> {
+  assert(actionHash != default<Bytes<32>>, "Multisig: action hash must not be zero");
+
+  _nextProposalId.increment(1);
+  const id = _nextProposalId;
+
+  _proposals.insert(id, disclose(Proposal {
+    actionHash: actionHash,
+    status: ProposalStatus.Active
+  }));
+
+  return id;
+}
+
+export circuit approveProposal(
+  id: Uint<64>,
+  signer: JubjubPoint,
+  signature: Schnorr_JubjubSchnorrSignature
+): [] {
+  assertProposalActive(id);
+  assertSigner(signer);
+  assert(!isProposalApprovedBySigner(id, signer), "Multisig: already approved");
+
+  const proposal = _proposals.lookup(disclose(id));
+  const messageHash = approvalMessageHash(_instanceSalt, id, proposal.actionHash);
+  Schnorr_assertValid(signer, messageHash, signature);
+
+  if (!_proposalApprovals.member(disclose(id))) {
+    _proposalApprovals.insert(disclose(id), default<Map<JubjubPoint, Boolean>>);
+  }
+
+  _proposalApprovals.lookup(disclose(id)).insert(disclose(signer), disclose(true));
+  _approvalCount.insert(disclose(id), disclose(getApprovalCount(id) + 1 as Uint<8>));
+}
+
+export circuit executeProposal(id: Uint<64>): Bytes<32> {
+  assertProposalActive(id);
+  assert(getApprovalCount(id) >= _threshold, "Multisig: threshold not met");
+
+  const proposal = _proposals.lookup(disclose(id));
+  _proposals.insert(disclose(id), disclose(Proposal {
+    actionHash: proposal.actionHash,
+    status: ProposalStatus.Executed
+  }));
+  _executedCount.increment(1);
+
+  return proposal.actionHash;
+}
+
+export circuit getApprovalMessageHash(id: Uint<64>): Bytes<32> {
+  assertProposalExists(id);
+  const proposal = _proposals.lookup(disclose(id));
+  return approvalMessageHash(_instanceSalt, id, proposal.actionHash);
+}
+
+export circuit getProposal(id: Uint<64>): Proposal {
+  assertProposalExists(id);
+  return _proposals.lookup(disclose(id));
+}
+
+export circuit getProposalActionHash(id: Uint<64>): Bytes<32> {
+  assertProposalExists(id);
+  return _proposals.lookup(disclose(id)).actionHash;
+}
+
+export circuit getProposalStatus(id: Uint<64>): ProposalStatus {
+  assertProposalExists(id);
+  return _proposals.lookup(disclose(id)).status;
+}
+
+export circuit getApprovalCount(id: Uint<64>): Uint<8> {
+  if (!_approvalCount.member(disclose(id))) {
+    return 0;
+  }
+  return _approvalCount.lookup(disclose(id));
+}
+
+export circuit isProposalApprovedBySigner(id: Uint<64>, signer: JubjubPoint): Boolean {
+  if (!_proposalApprovals.member(disclose(id))) {
+    return false;
+  }
+  if (!_proposalApprovals.lookup(disclose(id)).member(disclose(signer))) {
+    return false;
+  }
+  return _proposalApprovals.lookup(disclose(id)).lookup(disclose(signer));
+}
+
+export circuit getInstanceSalt(): Bytes<32> {
+  return _instanceSalt;
+}
+
+export circuit getSignerCount(): Uint<8> {
+  return _signerCount;
+}
+
+export circuit getThreshold(): Uint<8> {
+  return _threshold;
+}
+
+export circuit getNextProposalId(): Uint<64> {
+  return _nextProposalId;
+}
+
+export circuit getExecutedCount(): Uint<64> {
+  return _executedCount;
+}
+
+export circuit isSigner(signer: JubjubPoint): Boolean {
+  return _signers.member(disclose(signer));
+}
+
+circuit _addSigner(signer: JubjubPoint): [] {
+  Jubjub_assertNonIdentity(signer);
+  assert(!isSigner(signer), "Multisig: duplicate signer");
+  _signers.insert(disclose(signer));
+  _signerCount = _signerCount + 1 as Uint<8>;
+}
+
+circuit assertSigner(signer: JubjubPoint): [] {
+  Jubjub_assertNonIdentity(signer);
+  assert(isSigner(signer), "Multisig: not a signer");
+}
+
+circuit assertProposalExists(id: Uint<64>): [] {
+  assert(_proposals.member(disclose(id)), "Multisig: proposal not found");
+}
+
+circuit assertProposalActive(id: Uint<64>): [] {
+  assertProposalExists(id);
+  assert(
+    _proposals.lookup(disclose(id)).status == ProposalStatus.Active,
+    "Multisig: proposal not active"
+  );
+}

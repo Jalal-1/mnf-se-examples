@@ -1,0 +1,27 @@
+// SPDX-License-Identifier: Apache-2.0
+
+pragma language_version >= 0.21.0;
+
+module Jubjub {
+  import CompactStandardLibrary;
+
+  export pure circuit pointsEqual(a: JubjubPoint, b: JubjubPoint): Boolean {
+    return jubjubPointX(a) == jubjubPointX(b)
+        && jubjubPointY(a) == jubjubPointY(b);
+  }
+
+  export pure circuit isIdentity(p: JubjubPoint): Boolean {
+    return jubjubPointX(p) == 0 && jubjubPointY(p) == 1;
+  }
+
+  export pure circuit assertNonIdentity(p: JubjubPoint): [] {
+    assert(!isIdentity(p), "Jubjub: identity point not allowed");
+  }
+
+  export pure circuit fitInJubjubScalar(c: Field): Field {
+    const cBytes: Bytes<32> = upgradeFromTransient(c);
+    const truncated: Bytes<32> =
+      [...(slice<31>(cBytes, 0) as Bytes<31>), 0 as Uint<8>] as Bytes<32>;
+    return degradeToTransient(truncated);
+  }
+}

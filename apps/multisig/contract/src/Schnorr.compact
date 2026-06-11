@@ -1,0 +1,50 @@
+// SPDX-License-Identifier: Apache-2.0
+
+pragma language_version >= 0.21.0;
+
+module Schnorr {
+  import CompactStandardLibrary;
+  import "./Jubjub" prefix Jubjub_;
+
+  export struct JubjubSchnorrSignature {
+    R: JubjubPoint,
+    sigma: Field
+  }
+
+  export pure circuit challenge(
+    R: JubjubPoint,
+    P: JubjubPoint,
+    m: Bytes<32>
+  ): Field {
+    const cFull = transientHash<Vector<6, Field>>([
+      degradeToTransient(pad(32, "Schnorr:Jubjub:v1")),
+      jubjubPointX(R),
+      jubjubPointY(R),
+      jubjubPointX(P),
+      jubjubPointY(P),
+      degradeToTransient(m)
+    ]);
+    return Jubjub_fitInJubjubScalar(cFull);
+  }
+
+  export pure circuit verify(
+    P: JubjubPoint,
+    m: Bytes<32>,
+    sig: JubjubSchnorrSignature
+  ): Boolean {
+    const c = challenge(sig.R, P, m);
+    const lhs = ecMulGenerator(sig.sigma);
+    const rhs = ecAdd(sig.R, ecMul(P, c));
+    return !Jubjub_isIdentity(P)
+        && !Jubjub_isIdentity(sig.R)
+        && Jubjub_pointsEqual(lhs, rhs);
+  }
+
+  export pure circuit assertValid(
+    P: JubjubPoint,
+    m: Bytes<32>,
+    sig: JubjubSchnorrSignature
+  ): [] {
+    assert(verify(P, m, sig), "Schnorr: invalid signature");
+  }
+}
