@@ -39,7 +39,7 @@ let logger: Logger;
 
 const GENESIS_MINT_WALLET_SEED = '0000000000000000000000000000000000000000000000000000000000000001';
 const DIVIDER = '-'.repeat(76);
-const GUIDED_STEP_COUNT = 7;
+const GUIDED_STEP_COUNT = 8;
 
 const BANNER = `
 ${DIVIDER}
@@ -72,7 +72,8 @@ ${DIVIDER}
   [7] Execute approved mint proposal
   [8] Show contract summary
   [9] Show my shielded token balance
-  [10] Exit
+  [10] Burn one of my shielded token coins
+  [11] Exit
 ${DIVIDER}
 > `;
 
@@ -126,6 +127,17 @@ const waitForEnter = async (rli: Interface, prompt = 'Press Enter to continue.')
   console.log();
 };
 
+const promptYesNo = async (
+  rli: Interface,
+  prompt: string,
+  defaultValue = false,
+): Promise<boolean> => {
+  const suffix = defaultValue ? ' [Y/n]: ' : ' [y/N]: ';
+  const value = (await rli.question(`${prompt}${suffix}`)).trim().toLowerCase();
+  if (!value) return defaultValue;
+  return value === 'y' || value === 'yes';
+};
+
 const getDustLabel = async (wallet: WalletContext['wallet']): Promise<string> => {
   try {
     const dust = await getDustBalance(wallet);
@@ -140,6 +152,9 @@ const getWalletZswapKey = (walletCtx: WalletContext): Uint8Array =>
 
 const getSelfRecipient = (walletCtx: WalletContext): MintRecipient =>
   zswapRecipient(getWalletZswapKey(walletCtx));
+
+const shortHex = (hex: string): string =>
+  hex.length <= 24 ? hex : `${hex.slice(0, 12)}...${hex.slice(-8)}`;
 
 const generateKeys = (): DemoSigner[] => {
   const signers = generateDemoSigners();
@@ -209,6 +224,25 @@ const promptSignerSlots = async (rli: Interface): Promise<[number, number]> => {
       return [unique[0]!, unique[1]!];
     }
     console.log('  Please enter two different slots from 1, 2, and 3.');
+  }
+};
+
+const promptCoinIndex = async (
+  rli: Interface,
+  coins: readonly api.SpendableShieldedCoin[],
+): Promise<number> => {
+  if (coins.length === 1) {
+    console.log('  Only one spendable coin was found, so it is selected by default.');
+    return 0;
+  }
+
+  while (true) {
+    const value = await rli.question(`Select coin to burn, 1-${coins.length} [1]: `);
+    const index = Number.parseInt(value.trim() || '1', 10) - 1;
+    if (Number.isInteger(index) && index >= 0 && index < coins.length) {
+      return index;
+    }
+    console.log(`  Please choose a coin from 1 to ${coins.length}.`);
   }
 };
 
@@ -395,6 +429,54 @@ const executeMintProposal = async (
   console.log(`  Recipient: ${recipientLabel(proposal.recipient)}\n`);
 };
 
+const burnShieldedTokenCoin = async (
+  walletCtx: WalletContext,
+  session: Session,
+  rli: Interface,
+): Promise<void> => {
+  const contract = ensureContract(session);
+  const summary = await ensureSummary(session);
+  const coins = await api.getSpendableShieldedTokenCoins(walletCtx.wallet, summary.tokenColor);
+
+  if (coins.length === 0) {
+    console.log(`\n  No spendable ${summary.tokenName} coins were found in this wallet.`);
+    console.log('  If you just minted, wait a moment for wallet sync and check the balance again.\n');
+    return;
+  }
+
+  console.log(`\n  Spendable ${summary.tokenName} coins`);
+  console.log('  Burn currently consumes the selected shielded coin whole.\n');
+  coins.forEach((coin, index) => {
+    console.log(
+      `  [${index + 1}] value=${coin.value} nonce=${shortHex(bytesToHex(coin.nonce))} commitment=${shortHex(coin.commitment)}`,
+    );
+  });
+  console.log();
+
+  const selected = coins[await promptCoinIndex(rli, coins)]!;
+  const confirmed = await promptYesNo(
+    rli,
+    `Burn the selected coin with value ${selected.value}?`,
+    false,
+  );
+  if (!confirmed) {
+    console.log('\n  Burn cancelled.\n');
+    return;
+  }
+
+  await withStatus('Burning selected shielded token coin', () =>
+    api.burnTokens(contract, selected),
+  );
+
+  const updatedSummary = await ensureSummary(session);
+  const balance = await api.getShieldedTokenBalance(walletCtx.wallet, summary.tokenColor);
+  console.log(`\n  Burned coin value: ${selected.value}`);
+  console.log(`  Token color: ${bytesToHex(selected.color)}`);
+  console.log(`  Burned supply: ${updatedSummary.burnedSupply}`);
+  console.log(`  Circulating supply: ${updatedSummary.circulatingSupply}`);
+  console.log(`  My shielded balance: ${balance}\n`);
+};
+
 const showBalance = async (
   walletCtx: WalletContext,
   session: Session,
@@ -420,6 +502,8 @@ const showSummary = async (
   console.log(`  Token name: ${summary.tokenName}`);
   console.log(`  Token color: ${summary.tokenColor}`);
   console.log(`  Shielded supply: ${summary.shieldedSupply}`);
+  console.log(`  Burned supply: ${summary.burnedSupply}`);
+  console.log(`  Circulating supply: ${summary.circulatingSupply}`);
   console.log(`  Signers: ${summary.signerCount}`);
   console.log(`  Threshold: ${summary.threshold}`);
   console.log(`  Last proposal id: ${summary.nextProposalId}`);
@@ -510,6 +594,17 @@ const guidedDemo = async (
     'If you minted to your shielded wallet, your private balance should show the new token after wallet sync.',
   );
   await showBalance(walletCtx, session);
+
+  guideStep(
+    8,
+    'Optional burn',
+    'Burn lets the holder of a shielded coin remove that coin from circulation. The multisig is not needed because ownership is enforced by ZSwap.',
+  );
+  if (await promptYesNo(rli, 'Burn one of your spendable token coins now?', false)) {
+    await burnShieldedTokenCoin(walletCtx, session, rli);
+  } else {
+    console.log('\n  Skipping burn. You can use menu option 10 later.\n');
+  }
   console.log('  Guided walkthrough complete. You can rerun it or use the manual actions.\n');
 };
 
@@ -564,6 +659,9 @@ const mainLoop = async (
           await showBalance(walletCtx, session);
           break;
         case '10':
+          await burnShieldedTokenCoin(walletCtx, session, rli);
+          break;
+        case '11':
           return;
         default:
           console.log(`  Invalid choice: ${choice}`);

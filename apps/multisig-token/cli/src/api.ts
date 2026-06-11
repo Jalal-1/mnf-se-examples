@@ -6,6 +6,7 @@ import { levelPrivateStateProvider } from '@midnight-ntwrk/midnight-js-level-pri
 import { NodeZkConfigProvider } from '@midnight-ntwrk/midnight-js-node-zk-config-provider';
 import type { FinalizedTxData } from '@midnight-ntwrk/midnight-js-types';
 import { CompiledContract } from '@midnight-ntwrk/compact-js';
+import * as ledger from '@midnight-ntwrk/ledger-v8';
 import type { Logger } from 'pino';
 import * as Rx from 'rxjs';
 import path from 'node:path';
@@ -61,11 +62,24 @@ export type ContractSummary = {
   readonly domainSeparator: Uint8Array;
   readonly tokenColor: string;
   readonly shieldedSupply: bigint;
+  readonly burnedSupply: bigint;
+  readonly circulatingSupply: bigint;
   readonly signerCount: bigint;
   readonly threshold: bigint;
   readonly nextProposalId: bigint;
   readonly executedCount: bigint;
   readonly instanceSalt: Uint8Array;
+};
+
+export type ShieldedCoin = {
+  readonly nonce: Uint8Array;
+  readonly color: Uint8Array;
+  readonly value: bigint;
+};
+
+export type SpendableShieldedCoin = ShieldedCoin & {
+  readonly commitment: string;
+  readonly nullifier: string;
 };
 
 export const deploy = async (
@@ -126,14 +140,24 @@ export const approveMintProposal = async (
 export const executeMintProposal = async (
   contract: DeployedMultisigTokenContract,
   proposalId: bigint,
-): Promise<{ tx: FinalizedTxData; coin: { nonce: Uint8Array; color: Uint8Array; value: bigint } }> => {
+): Promise<{ tx: FinalizedTxData; coin: ShieldedCoin }> => {
   logger.info(`Executing mint proposal ${proposalId}...`);
   const result = await contract.callTx.executeMintProposal(proposalId);
   logger.info(`Transaction ${result.public.txId} added in block ${result.public.blockHeight}`);
   return {
     tx: result.public,
-    coin: result.private.result as { nonce: Uint8Array; color: Uint8Array; value: bigint },
+    coin: result.private.result as ShieldedCoin,
   };
+};
+
+export const burnTokens = async (
+  contract: DeployedMultisigTokenContract,
+  coin: ShieldedCoin,
+): Promise<FinalizedTxData> => {
+  logger.info(`Burning shielded coin with value ${coin.value}...`);
+  const result = await contract.callTx.burn(coin);
+  logger.info(`Transaction ${result.public.txId} added in block ${result.public.blockHeight}`);
+  return result.public;
 };
 
 export const readProposal = async (
@@ -159,6 +183,8 @@ export const getContractSummary = async (
     domainSeparator: Uint8Array;
     tokenColor: Uint8Array;
     shieldedSupply: bigint;
+    burnedSupply: bigint;
+    circulatingSupply: bigint;
     signerCount: bigint;
     threshold: bigint;
     nextProposalId: bigint;
@@ -170,6 +196,8 @@ export const getContractSummary = async (
     domainSeparator: value.domainSeparator,
     tokenColor: bytesToHex(value.tokenColor),
     shieldedSupply: value.shieldedSupply,
+    burnedSupply: value.burnedSupply,
+    circulatingSupply: value.circulatingSupply,
     signerCount: value.signerCount,
     threshold: value.threshold,
     nextProposalId: value.nextProposalId,
@@ -184,6 +212,20 @@ export const getShieldedTokenBalance = async (
 ): Promise<bigint> => {
   const state = await Rx.firstValueFrom(wallet.state());
   return state.shielded?.balances[tokenColor] ?? 0n;
+};
+
+export const getSpendableShieldedTokenCoins = async (
+  wallet: WalletContext['wallet'],
+  tokenColor: string,
+): Promise<SpendableShieldedCoin[]> => {
+  const state = await Rx.firstValueFrom(wallet.state());
+  return (state.shielded?.availableCoins ?? [])
+    .filter(({ coin }) => coin.type === tokenColor && coin.value > 0n)
+    .map(({ coin, commitment, nullifier }) => ({
+      ...ledger.encodeShieldedCoinInfo(coin),
+      commitment,
+      nullifier,
+    }));
 };
 
 export const configureProviders = async (

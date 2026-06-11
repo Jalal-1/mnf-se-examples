@@ -1,10 +1,10 @@
-# Multisig Shielded Token Mint
+# Multisig Shielded Token Mint + Burn
 
-Guided 2-of-3 multisig example that controls minting of a shielded ZSwap token.
+Guided 2-of-3 multisig example that controls minting of a shielded ZSwap token and lets holders burn their own shielded token coins.
 
 The user chooses the token name during deployment. The CLI then guides one person through a demo key ceremony, creates a mint proposal, signs that exact mint intent with any two of the three local demo signer keys, and executes the mint after the threshold is met.
 
-This app does not use `ownPublicKey()` for authorization. The transaction submitter only pays fees; authorization comes from Schnorr signatures verified by the contract.
+This app does not use `ownPublicKey()` for authorization. The transaction submitter only pays fees. Mint authorization comes from Schnorr signatures verified by the contract. Burn authorization comes from shielded coin ownership enforced by ZSwap.
 
 ## Run
 
@@ -33,6 +33,7 @@ Choose `Guided key ceremony + shielded mint walkthrough` from the CLI. The CLI p
 5. Approval submission: produce two Schnorr signatures locally and submit both approvals.
 6. Execute: mint the shielded ZSwap token after the threshold is met.
 7. Review: inspect supply and wallet balance.
+8. Optional burn: choose one spendable shielded token coin from your wallet and burn it.
 
 For the simplest demo, press Enter through the ceremony prompts, use the default token name, mint `100` tokens, choose recipient `1` for your own shielded wallet, and press Enter at the signer prompt to sign with signers `1` and `2`.
 
@@ -49,6 +50,12 @@ Supported recipient choices:
 
 Contract recipients are useful for treasury-style flows. This app focuses on multisig-controlled mint authorization. A full treasury custody and release workflow can be layered on with the `ShieldedTreasury` reference modules.
 
+## Burn
+
+Burning is holder-controlled. The CLI lists spendable shielded coins in your wallet for this token color, asks which coin to burn, and submits the selected coin to the contract's `burn` circuit.
+
+The current demo burns the selected shielded coin whole. If you mint `100` tokens as one coin, burning that coin burns all `100`. Partial burns would require a split/change flow and are intentionally left out of this simple example.
+
 ## Manual Flow
 
 Use the manual menu to:
@@ -59,3 +66,4 @@ Use the manual menu to:
 4. Approve a proposal with any two signer slots.
 5. Execute the proposal.
 6. View contract supply and wallet balance.
+7. Burn one of your spendable shielded token coins.
