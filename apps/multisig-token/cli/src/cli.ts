@@ -10,11 +10,19 @@ import {
   buildWalletAndWaitForFunds,
   buildFreshWallet,
   getDustBalance,
-  withStatus,
 } from '@mnf-se/common';
 
 import type { DeployedMultisigTokenContract, MultisigTokenProviders } from './types.js';
 import * as api from './api.js';
+import {
+  type DashboardInstruction,
+  type DashboardMessage,
+  dashboardPrompt,
+  enterDashboardScreen,
+  exitDashboardScreen,
+  renderDashboard,
+  renderSplash,
+} from './display.js';
 import {
   bytesToHex,
   bytesToTokenName,
@@ -38,44 +46,7 @@ import {
 let logger: Logger;
 
 const GENESIS_MINT_WALLET_SEED = '0000000000000000000000000000000000000000000000000000000000000001';
-const DIVIDER = '-'.repeat(76);
-const GUIDED_STEP_COUNT = 8;
-
-const BANNER = `
-${DIVIDER}
-  Midnight Multisig Shielded Token Mint
-  2-of-3 Schnorr approvals control shielded ZSwap token minting.
-  No ownPublicKey() authorization.
-${DIVIDER}
-`;
-
-const WALLET_MENU = `
-${DIVIDER}
-  Wallet Setup
-${DIVIDER}
-  [1] Create a new wallet
-  [2] Restore wallet from seed
-  [3] Exit
-${DIVIDER}
-> `;
-
-const MENU = `
-${DIVIDER}
-  Multisig Token Actions
-${DIVIDER}
-  [1] Guided key ceremony + shielded mint walkthrough
-  [2] Generate fresh demo signer keys
-  [3] Deploy token mint controller with current keys
-  [4] Join existing contract
-  [5] Create shielded mint proposal
-  [6] Sign and submit approvals with any 2 keys
-  [7] Execute approved mint proposal
-  [8] Show contract summary
-  [9] Show my shielded token balance
-  [10] Burn one of my shielded token coins
-  [11] Exit
-${DIVIDER}
-> `;
+const UINT64_MAX = (1n << 64n) - 1n;
 
 const STATUS_NAMES = ['Inactive', 'Active', 'Executed'];
 
@@ -83,57 +54,137 @@ type ProposalRecord = {
   readonly id: bigint;
   readonly amount: bigint;
   readonly recipient: MintRecipient;
+  status?: string;
+  approvals?: bigint | null;
 };
 
-type Session = {
-  signers: DemoSigner[] | null;
-  contract: DeployedMultisigTokenContract | null;
+type TokenRecord = {
+  readonly sessionId: number;
+  contract: DeployedMultisigTokenContract;
+  summary: api.ContractSummary | null;
+  chainReadAt: string | null;
   tokenName: Uint8Array | null;
   domainSeparator: Uint8Array | null;
   instanceSalt: Uint8Array | null;
   tokenColor: string | null;
   proposals: Map<string, ProposalRecord>;
+  localSigners: DemoSigner[] | null;
 };
 
-const buildWallet = async (config: Config, rli: Interface): Promise<WalletContext | null> => {
+type Session = {
+  signers: DemoSigner[] | null;
+  tokens: TokenRecord[];
+  activeTokenIndex: number;
+  activity: DashboardMessage[];
+  guidance: DashboardInstruction | null;
+};
+
+type StatusRenderer = (message: DashboardMessage) => Promise<void>;
+type PromptReader = (prompt: string) => Promise<string>;
+
+const networkLabel = (config: Config): string => {
+  if (config instanceof StandaloneConfig) return 'undeployed';
+  return config.node.includes('preview') ? 'preview' : 'preprod';
+};
+
+const remember = (
+  activity: DashboardMessage[],
+  type: DashboardMessage['type'],
+  text: string,
+): void => {
+  activity.push({ type, text });
+  if (activity.length > 80) {
+    activity.splice(0, activity.length - 80);
+  }
+};
+
+const guide = (
+  session: Session,
+  title: string,
+  body: string,
+  tone: DashboardInstruction['tone'] = 'guide',
+): void => {
+  session.guidance = { title, body, tone };
+};
+
+const silenceTerminalOutput = async <T>(fn: () => Promise<T>): Promise<T> => {
+  const stdoutWrite = process.stdout.write.bind(process.stdout);
+  const stderrWrite = process.stderr.write.bind(process.stderr);
+  const consoleLog = console.log;
+  const consoleWarn = console.warn;
+  const consoleError = console.error;
+
+  try {
+    process.stdout.write = (() => true) as typeof process.stdout.write;
+    process.stderr.write = (() => true) as typeof process.stderr.write;
+    console.log = () => undefined;
+    console.warn = () => undefined;
+    console.error = () => undefined;
+    return await fn();
+  } finally {
+    process.stdout.write = stdoutWrite as typeof process.stdout.write;
+    process.stderr.write = stderrWrite as typeof process.stderr.write;
+    console.log = consoleLog;
+    console.warn = consoleWarn;
+    console.error = consoleError;
+  }
+};
+
+const buildWallet = async (
+  config: Config,
+  rli: Interface,
+  activity: DashboardMessage[],
+): Promise<WalletContext | null> => {
+  const net = networkLabel(config);
   if (config instanceof StandaloneConfig) {
-    return await buildWalletAndWaitForFunds(config, GENESIS_MINT_WALLET_SEED);
+    remember(activity, 'info', 'Building local funded wallet...');
+    renderSplash('wallet', `Building wallet for ${net}. This can take a moment.`, activity);
+    const wallet = await silenceTerminalOutput(() =>
+      buildWalletAndWaitForFunds(config, GENESIS_MINT_WALLET_SEED),
+    );
+    remember(activity, 'success', 'Wallet ready.');
+    return wallet;
   }
 
   while (true) {
-    const choice = await rli.question(WALLET_MENU);
+    renderSplash(
+      'wallet setup',
+      `Network: ${net}`,
+      activity,
+    );
+    const choice = await rli.question(dashboardPrompt('[1] Create new wallet   [2] Restore from seed   [3] Exit'));
     switch (choice.trim()) {
-      case '1':
-        return await buildFreshWallet(config);
+      case '1': {
+        remember(activity, 'info', `Creating and syncing fresh ${net} wallet...`);
+        renderSplash('wallet', `Creating and syncing fresh ${net} wallet.`, activity);
+        const wallet = await silenceTerminalOutput(() => buildFreshWallet(config));
+        remember(activity, 'success', 'Wallet ready.');
+        return wallet;
+      }
       case '2': {
-        const seed = await rli.question('Enter your wallet seed: ');
-        return await buildWalletAndWaitForFunds(config, seed.trim());
+        renderSplash('wallet setup', `Network: ${net}`, activity);
+        const seed = await rli.question(dashboardPrompt('Enter wallet seed'));
+        remember(activity, 'info', `Restoring and syncing ${net} wallet...`);
+        renderSplash('wallet', `Restoring and syncing ${net} wallet.`, activity);
+        const wallet = await silenceTerminalOutput(() => buildWalletAndWaitForFunds(config, seed.trim()));
+        remember(activity, 'success', 'Wallet ready.');
+        return wallet;
       }
       case '3':
         return null;
       default:
-        console.log(`  Invalid choice: ${choice}`);
+        remember(activity, 'error', `Invalid wallet setup choice: ${choice}`);
     }
   }
 };
 
-const guideStep = (step: number, title: string, detail: string): void => {
-  console.log(`\n  Step ${step}/${GUIDED_STEP_COUNT}: ${title}`);
-  console.log(`  ${detail}\n`);
-};
-
-const waitForEnter = async (rli: Interface, prompt = 'Press Enter to continue.'): Promise<void> => {
-  await rli.question(`  ${prompt}`);
-  console.log();
-};
-
 const promptYesNo = async (
-  rli: Interface,
+  ask: PromptReader,
   prompt: string,
   defaultValue = false,
 ): Promise<boolean> => {
   const suffix = defaultValue ? ' [Y/n]: ' : ' [y/N]: ';
-  const value = (await rli.question(`${prompt}${suffix}`)).trim().toLowerCase();
+  const value = (await ask(`${prompt}${suffix}`)).trim().toLowerCase();
   if (!value) return defaultValue;
   return value === 'y' || value === 'yes';
 };
@@ -156,14 +207,204 @@ const getSelfRecipient = (walletCtx: WalletContext): MintRecipient =>
 const shortHex = (hex: string): string =>
   hex.length <= 24 ? hex : `${hex.slice(0, 12)}...${hex.slice(-8)}`;
 
-const generateKeys = (): DemoSigner[] => {
-  const signers = generateDemoSigners();
-  console.log('\n  Generated 3 local demo signing keys:\n');
-  for (let i = 0; i < signers.length; i++) {
-    console.log(`  [${i + 1}] ${signers[i]!.label}: ${publicKeyLabel(signers[i]!.publicKey)}`);
+const getActiveToken = (session: Session): TokenRecord | null =>
+  session.tokens[session.activeTokenIndex] ?? null;
+
+const ensureActiveToken = (session: Session): TokenRecord => {
+  const token = getActiveToken(session);
+  if (!token) {
+    throw new Error('No multisig token contract selected. Deploy or join one first.');
   }
-  console.log('\n  These are local demo keys. The contract only stores the public keys.\n');
-  return signers;
+  return token;
+};
+
+const getTokenAddress = (token: TokenRecord): string =>
+  token.contract.deployTxData.public.contractAddress;
+
+const getTokenName = (token: TokenRecord): string =>
+  token.summary?.tokenName ?? (token.tokenName ? bytesToTokenName(token.tokenName) : `Token #${token.sessionId}`);
+
+const getTokenColor = (token: TokenRecord): string | null =>
+  token.summary?.tokenColor ?? token.tokenColor;
+
+const getSigningSigners = (token: TokenRecord): DemoSigner[] => {
+  if (token.localSigners) return token.localSigners;
+  throw new Error('This token was joined without local demo signer keys. You can view or burn wallet-owned coins, but this CLI cannot approve mint proposals for it.');
+};
+
+const getDisplaySigners = (session: Session): DemoSigner[] => {
+  const token = getActiveToken(session);
+  return token?.localSigners ?? session.signers ?? [];
+};
+
+const getSignerScope = (session: Session): string => {
+  const token = getActiveToken(session);
+  if (token?.localSigners) return `active token #${token.sessionId}`;
+  if (token) return `token #${token.sessionId} view/burn only`;
+  if (session.signers) return 'staged for next deploy';
+  return 'no key ceremony yet';
+};
+
+const addTokenRecord = (
+  session: Session,
+  contract: DeployedMultisigTokenContract,
+  tokenName: Uint8Array | null,
+  instanceSalt: Uint8Array | null,
+  localSigners: DemoSigner[] | null,
+): TokenRecord => {
+  const token: TokenRecord = {
+    sessionId: session.tokens.length + 1,
+    contract,
+    summary: null,
+    chainReadAt: null,
+    tokenName,
+    domainSeparator: tokenName,
+    instanceSalt,
+    tokenColor: null,
+    proposals: new Map(),
+    localSigners: localSigners ? [...localSigners] : null,
+  };
+  session.tokens.push(token);
+  session.activeTokenIndex = session.tokens.length - 1;
+  return token;
+};
+
+const cycleActiveToken = (session: Session, delta: number): TokenRecord | null => {
+  if (session.tokens.length === 0) return null;
+  session.activeTokenIndex = (session.activeTokenIndex + delta + session.tokens.length) % session.tokens.length;
+  return ensureActiveToken(session);
+};
+
+const updateTokenFromSummary = (token: TokenRecord, summary: api.ContractSummary): void => {
+  token.summary = summary;
+  token.chainReadAt = new Date().toLocaleTimeString();
+  token.tokenName = tokenNameToBytes(summary.tokenName);
+  token.domainSeparator = summary.domainSeparator;
+  token.instanceSalt = summary.instanceSalt;
+  token.tokenColor = summary.tokenColor;
+};
+
+const readLiveProposal = async (
+  contract: DeployedMultisigTokenContract,
+  proposal: ProposalRecord,
+): Promise<ProposalRecord> => {
+  try {
+    const view = await api.readProposal(contract, proposal.id);
+    return {
+      id: proposal.id,
+      amount: view.amount,
+      recipient: view.recipient,
+      status: STATUS_NAMES[view.status] ?? String(view.status),
+      approvals: view.approvals,
+    };
+  } catch {
+    return {
+      ...proposal,
+      status: proposal.status ?? 'Unknown',
+      approvals: proposal.approvals ?? null,
+    };
+  }
+};
+
+const renderLiveDashboard = async (
+  walletCtx: WalletContext,
+  session: Session,
+  message?: DashboardMessage,
+): Promise<void> => {
+  const token = getActiveToken(session);
+  const summary = token?.summary ?? null;
+  let dashboardMessage = message;
+
+  const dustLabel = await getDustLabel(walletCtx.wallet);
+  const tokenBalances = new Map<number, bigint | null>();
+  await Promise.all(session.tokens.map(async (record) => {
+    const color = getTokenColor(record);
+    if (!color) {
+      tokenBalances.set(record.sessionId, null);
+      return;
+    }
+    try {
+      tokenBalances.set(record.sessionId, await api.getShieldedTokenBalance(walletCtx.wallet, color));
+    } catch {
+      tokenBalances.set(record.sessionId, null);
+    }
+  }));
+
+  const tokenColor = token ? getTokenColor(token) : null;
+  let tokenBalance: bigint | null = null;
+  let spendableCoinCount: number | null = null;
+  if (tokenColor) {
+    try {
+      const [balance, coins] = await Promise.all([
+        api.getShieldedTokenBalance(walletCtx.wallet, tokenColor),
+        api.getSpendableShieldedTokenCoins(walletCtx.wallet, tokenColor),
+      ]);
+      tokenBalance = balance;
+      spendableCoinCount = coins.length;
+    } catch (e) {
+      dashboardMessage ??= {
+        type: 'error',
+        text: `Live wallet read failed: ${e instanceof Error ? e.message : String(e)}`,
+      };
+    }
+  }
+
+  const proposals = Array.from(token?.proposals.values() ?? [])
+    .sort((a, b) => Number(a.id - b.id));
+  const displaySigners = getDisplaySigners(session);
+
+  renderDashboard({
+    wallet: {
+      address: walletCtx.unshieldedKeystore.getBech32Address().toString(),
+      zswapKey: bytesToHex(getWalletZswapKey(walletCtx)),
+      dust: dustLabel,
+      tokenBalance,
+      spendableCoinCount,
+    },
+    token: {
+      sessionLabel: token ? `${session.activeTokenIndex + 1}/${session.tokens.length}` : null,
+      contractAddress: token ? getTokenAddress(token) : null,
+      tokenName: token ? getTokenName(token) : null,
+      tokenColor,
+      shieldedSupply: summary?.shieldedSupply ?? null,
+      burnedSupply: summary?.burnedSupply ?? null,
+      circulatingSupply: summary?.circulatingSupply ?? null,
+      signerCount: summary?.signerCount ?? null,
+      threshold: summary?.threshold ?? (displaySigners.length > 0 ? 2n : null),
+      nextProposalId: summary?.nextProposalId ?? null,
+      executedCount: summary?.executedCount ?? null,
+      refreshedAt: token?.chainReadAt ?? null,
+      signerStatus: token ? token.localSigners ? 'ready' : 'view-only' : null,
+    },
+    tokens: session.tokens.map((record, index) => ({
+      index: index + 1,
+      label: getTokenName(record),
+      contractAddress: getTokenAddress(record),
+      selected: index === session.activeTokenIndex,
+      signerStatus: record.localSigners ? 'ready' : 'view-only',
+      balance: tokenBalances.get(record.sessionId) ?? null,
+    })),
+    signers: displaySigners.map((signer, index) => ({
+      slot: index + 1,
+      label: signer.label,
+      publicKey: publicKeyLabel(signer.publicKey),
+    })),
+    signerScope: getSignerScope(session),
+    proposals: proposals.map((proposal) => ({
+      id: proposal.id,
+      amount: proposal.amount,
+      recipient: recipientLabel(proposal.recipient),
+      status: proposal.status ?? 'Local',
+      approvals: proposal.approvals ?? null,
+    })),
+    instruction: session.guidance,
+    message: dashboardMessage,
+    activity: session.activity,
+  });
+};
+
+const generateKeys = (): DemoSigner[] => {
+  return generateDemoSigners();
 };
 
 const ensureSigners = (session: Session): DemoSigner[] => {
@@ -173,27 +414,52 @@ const ensureSigners = (session: Session): DemoSigner[] => {
   return session.signers;
 };
 
-const ensureContract = (session: Session): DeployedMultisigTokenContract => {
-  if (!session.contract) {
-    throw new Error('No multisig token contract selected. Deploy or join one first.');
-  }
-  return session.contract;
+const withLiveInfo = async <T>(
+  status: StatusRenderer | undefined,
+  text: string,
+  fn: () => Promise<T>,
+): Promise<T> => {
+  await status?.({ type: 'info', text });
+  return await silenceTerminalOutput(fn);
 };
 
-const promptTokenName = async (rli: Interface): Promise<Uint8Array> => {
+const pauseDashboard = async (
+  walletCtx: WalletContext,
+  session: Session,
+  rli: Interface,
+  text: string,
+): Promise<void> => {
+  guide(session, 'Next', text, 'guide');
+  await renderLiveDashboard(walletCtx, session);
+  await rli.question(dashboardPrompt('Press Enter to continue'));
+};
+
+const askDashboard = async (
+  walletCtx: WalletContext,
+  session: Session,
+  rli: Interface,
+  prompt: string,
+): Promise<string> => {
+  guide(session, 'Input', prompt, 'prompt');
+  await renderLiveDashboard(walletCtx, session);
+  return await rli.question(dashboardPrompt(prompt));
+};
+
+const promptTokenName = async (ask: PromptReader): Promise<Uint8Array> => {
   while (true) {
-    const tokenNameInput = await rli.question('Token name [Demo Shielded Token]: ');
+    const tokenNameInput = await ask('Token name [Demo Shielded Token]');
     try {
       return tokenNameToBytes(tokenNameInput.trim() || 'Demo Shielded Token');
     } catch (e) {
-      console.log(`  ${e instanceof Error ? e.message : String(e)}`);
+      // Re-prompt with the validation error visible in the command line.
+      await ask(e instanceof Error ? e.message : String(e));
     }
   }
 };
 
-const promptAmount = async (rli: Interface): Promise<bigint> => {
+const promptAmount = async (ask: PromptReader): Promise<bigint> => {
   while (true) {
-    const amountInput = await rli.question('Amount to mint, 1-65535 [100]: ');
+    const amountInput = await ask('Amount to mint, 1-65535 [100]');
     try {
       const amount = BigInt(amountInput.trim() || '100');
       if (amount > 0n && amount <= 65535n) {
@@ -202,15 +468,31 @@ const promptAmount = async (rli: Interface): Promise<bigint> => {
     } catch {
       // Fall through to the shared validation message.
     }
-    console.log('  Amount must be between 1 and 65535.');
+    await ask('Amount must be between 1 and 65535. Press Enter to retry');
   }
 };
 
-const promptSignerSlots = async (rli: Interface): Promise<[number, number]> => {
+const promptBurnAmount = async (
+  ask: PromptReader,
+  max: bigint,
+): Promise<bigint> => {
   while (true) {
-    const inputText = await rli.question(
-      'Choose any 2 signer slots to approve, e.g. "1 3" [1 2]: ',
-    );
+    const amountInput = await ask(`Amount to burn, 1-${max} [${max}]`);
+    try {
+      const amount = BigInt(amountInput.trim() || max.toString());
+      if (amount > 0n && amount <= max && amount <= UINT64_MAX) {
+        return amount;
+      }
+    } catch {
+      // Fall through to the shared validation message.
+    }
+    await ask(`Amount must be between 1 and ${max}. Press Enter to retry`);
+  }
+};
+
+const promptSignerSlots = async (ask: PromptReader): Promise<[number, number]> => {
+  while (true) {
+    const inputText = await ask('Choose any 2 signer slots to approve, e.g. "1 3" [1 2]');
     const raw = inputText.trim() || '1 2';
     const slots = raw
       .split(/[,\s]+/)
@@ -223,26 +505,56 @@ const promptSignerSlots = async (rli: Interface): Promise<[number, number]> => {
     ) {
       return [unique[0]!, unique[1]!];
     }
-    console.log('  Please enter two different slots from 1, 2, and 3.');
+    await ask('Please enter two different slots from 1, 2, and 3. Press Enter to retry');
   }
 };
 
 const promptCoinIndex = async (
-  rli: Interface,
+  ask: PromptReader,
   coins: readonly api.SpendableShieldedCoin[],
 ): Promise<number> => {
   if (coins.length === 1) {
-    console.log('  Only one spendable coin was found, so it is selected by default.');
     return 0;
   }
 
   while (true) {
-    const value = await rli.question(`Select coin to burn, 1-${coins.length} [1]: `);
+    const value = await ask(`Select coin to burn, 1-${coins.length} [1]`);
     const index = Number.parseInt(value.trim() || '1', 10) - 1;
     if (Number.isInteger(index) && index >= 0 && index < coins.length) {
       return index;
     }
-    console.log(`  Please choose a coin from 1 to ${coins.length}.`);
+    await ask(`Please choose a coin from 1 to ${coins.length}. Press Enter to retry`);
+  }
+};
+
+const promptQualifiedShieldedBurnCoin = async (
+  ask: PromptReader,
+  summary: api.ContractSummary,
+): Promise<api.QualifiedShieldedCoin> => {
+  while (true) {
+    try {
+      const nonceHex = await ask('Contract-owned coin nonce (64 hex chars)');
+      const valueInput = await ask('Contract-owned coin value');
+      const mtIndexInput = await ask('Contract-owned coin mt_index');
+      const value = BigInt(valueInput.trim());
+      const mt_index = BigInt(mtIndexInput.trim());
+
+      if (value <= 0n) {
+        throw new Error('Coin value must be greater than zero');
+      }
+      if (mt_index < 0n || mt_index > UINT64_MAX) {
+        throw new Error('mt_index must be a Uint<64> value');
+      }
+
+      return {
+        nonce: hexToBytes32(nonceHex, 'Coin nonce'),
+        color: hexToBytes32(summary.tokenColor, 'Token color'),
+        value,
+        mt_index,
+      };
+    } catch (e) {
+      await ask(`${e instanceof Error ? e.message : String(e)}. Press Enter to retry`);
+    }
   }
 };
 
@@ -252,47 +564,43 @@ const contractAddressBytes = (contractAddress: string): Uint8Array =>
 const promptRecipient = async (
   walletCtx: WalletContext,
   session: Session,
-  rli: Interface,
+  ask: PromptReader,
 ): Promise<MintRecipient> => {
-  const contract = session.contract;
-  console.log('\n  Recipient');
-  console.log('  [1] My shielded wallet (recommended)');
-  console.log('  [2] This contract address (treasury-style recipient)');
-  console.log('  [3] Another shielded wallet ZSwap public key');
-  console.log('  [4] Another contract address');
+  const token = getActiveToken(session);
+  remember(session.activity, 'info', 'Recipient: [1] my wallet, [2] this contract, [3] another ZSwap key, [4] another contract.');
 
   while (true) {
-    const choice = (await rli.question('> ')).trim() || '1';
+    const choice = (await ask('Recipient [1=my wallet, 2=this contract, 3=ZSwap key, 4=contract]')).trim() || '1';
     switch (choice) {
       case '1':
         return getSelfRecipient(walletCtx);
       case '2': {
-        if (!contract) {
-          console.log('  Deploy or join a contract before selecting this contract as recipient.');
+        if (!token) {
+          remember(session.activity, 'error', 'Deploy or join a contract before selecting this contract as recipient.');
           break;
         }
-        return contractRecipient(contractAddressBytes(contract.deployTxData.public.contractAddress));
+        return contractRecipient(contractAddressBytes(getTokenAddress(token)));
       }
       case '3': {
-        const keyHex = await rli.question('Recipient ZSwap public key (64 hex chars): ');
+        const keyHex = await ask('Recipient ZSwap public key (64 hex chars)');
         try {
           return zswapRecipient(hexToBytes32(keyHex, 'ZSwap public key'));
         } catch (e) {
-          console.log(`  ${e instanceof Error ? e.message : String(e)}`);
+          remember(session.activity, 'error', e instanceof Error ? e.message : String(e));
           break;
         }
       }
       case '4': {
-        const addrHex = await rli.question('Recipient contract address (64 hex chars): ');
+        const addrHex = await ask('Recipient contract address (64 hex chars)');
         try {
           return contractRecipient(hexToBytes32(addrHex, 'Contract address'));
         } catch (e) {
-          console.log(`  ${e instanceof Error ? e.message : String(e)}`);
+          remember(session.activity, 'error', e instanceof Error ? e.message : String(e));
           break;
         }
       }
       default:
-        console.log(`  Invalid choice: ${choice}`);
+        remember(session.activity, 'error', `Invalid recipient choice: ${choice}`);
     }
   }
 };
@@ -301,93 +609,112 @@ const deployCurrent = async (
   providers: MultisigTokenProviders,
   session: Session,
   tokenName: Uint8Array,
+  status?: StatusRenderer,
 ): Promise<DeployedMultisigTokenContract> => {
   const signers = ensureSigners(session);
   const salt = randomBytes32();
-  const contract = await withStatus('Deploying multisig shielded token mint controller', () =>
+  const contract = await withLiveInfo(status, 'Deploying multisig shielded token mint controller...', () =>
     api.deploy(providers, tokenName, signers.map((s) => s.publicKey), 2n, salt),
   );
-  session.contract = contract;
-  session.tokenName = tokenName;
-  session.domainSeparator = tokenName;
-  session.instanceSalt = salt;
-  session.tokenColor = null;
-
-  console.log(`\n  Contract deployed at: ${contract.deployTxData.public.contractAddress}`);
-  console.log(`  Token name: ${bytesToTokenName(tokenName)}`);
-  console.log('  Threshold: 2 of 3');
-  console.log(`  Instance salt: ${bytesToHex(salt)}\n`);
+  const token = addTokenRecord(session, contract, tokenName, salt, signers);
+  remember(session.activity, 'success', `Token #${token.sessionId} deployed: ${shortHex(getTokenAddress(token))}`);
+  remember(session.activity, 'info', `Token name: ${bytesToTokenName(tokenName)} | threshold: 2 of 3 | signer ceremony saved for this session`);
   return contract;
 };
 
 const ensureSummary = async (
   session: Session,
+  status?: StatusRenderer,
 ): Promise<api.ContractSummary> => {
-  const contract = ensureContract(session);
-  const summary = await api.getContractSummary(contract);
-  session.tokenName = tokenNameToBytes(summary.tokenName);
-  session.domainSeparator = summary.domainSeparator;
-  session.instanceSalt = summary.instanceSalt;
-  session.tokenColor = summary.tokenColor;
+  const token = ensureActiveToken(session);
+  const summary = await withLiveInfo(status, 'Querying chain for contract summary...', () =>
+    api.getContractSummary(token.contract),
+  );
+  updateTokenFromSummary(token, summary);
   return summary;
+};
+
+const refreshTrackedProposalViews = async (
+  session: Session,
+  status?: StatusRenderer,
+): Promise<void> => {
+  const token = ensureActiveToken(session);
+  for (const proposal of token.proposals.values()) {
+    const updated = await withLiveInfo(
+      status,
+      `Querying chain for proposal ${proposal.id}...`,
+      () => readLiveProposal(token.contract, proposal),
+    );
+    token.proposals.set(proposal.id.toString(), updated);
+  }
+};
+
+const refreshContractDashboardState = async (
+  session: Session,
+  status?: StatusRenderer,
+): Promise<void> => {
+  await ensureSummary(session, status);
+  await refreshTrackedProposalViews(session, status);
 };
 
 const createMintProposal = async (
   walletCtx: WalletContext,
   session: Session,
-  rli: Interface,
+  ask: PromptReader,
+  status?: StatusRenderer,
 ): Promise<ProposalRecord> => {
-  const contract = ensureContract(session);
-  const summary = await ensureSummary(session);
-  const amount = await promptAmount(rli);
-  const recipient = await promptRecipient(walletCtx, session, rli);
+  const token = ensureActiveToken(session);
+  const summary = await ensureSummary(session, status);
+  const amount = await promptAmount(ask);
+  const recipient = await promptRecipient(walletCtx, session, ask);
   const actionHash = mintActionHash(summary.domainSeparator, recipient, amount);
-  const { proposalId } = await withStatus('Creating mint proposal', () =>
-    api.createMintProposal(contract, amount, recipient),
+  const { proposalId } = await withLiveInfo(status, 'Submitting mint proposal transaction...', () =>
+    api.createMintProposal(token.contract, amount, recipient),
   );
-  const proposal = { id: proposalId, amount, recipient };
-  session.proposals.set(proposalId.toString(), proposal);
-
-  console.log(`\n  Proposal ${proposalId} created`);
-  console.log(`  Token: ${summary.tokenName}`);
-  console.log(`  Amount: ${amount}`);
-  console.log(`  Recipient: ${recipientLabel(recipient)}`);
-  console.log(`  Mint action hash: ${bytesToHex(actionHash)}\n`);
+  const proposal = { id: proposalId, amount, recipient, status: 'Active', approvals: 0n };
+  token.proposals.set(proposalId.toString(), proposal);
+  remember(session.activity, 'success', `Token #${token.sessionId} proposal ${proposalId} created for ${amount} ${summary.tokenName}`);
+  remember(session.activity, 'info', `Recipient: ${recipientLabel(recipient)} | action ${shortHex(bytesToHex(actionHash))}`);
   return proposal;
 };
 
 const getProposalRecord = async (
-  contract: DeployedMultisigTokenContract,
   session: Session,
-  rli: Interface,
+  ask: PromptReader,
+  status?: StatusRenderer,
 ): Promise<ProposalRecord> => {
-  const idInput = await rli.question('Proposal id: ');
+  const token = ensureActiveToken(session);
+  const idInput = await ask('Proposal id');
   const id = BigInt(idInput.trim());
-  const existing = session.proposals.get(id.toString());
+  const existing = token.proposals.get(id.toString());
   if (existing) return existing;
 
-  const view = await withStatus('Reading mint proposal', () => api.readProposal(contract, id));
+  const view = await withLiveInfo(status, `Querying chain for proposal ${id}...`, () =>
+    api.readProposal(token.contract, id),
+  );
   const proposal = {
     id,
     amount: view.amount,
     recipient: view.recipient,
+    status: STATUS_NAMES[view.status] ?? String(view.status),
+    approvals: view.approvals,
   };
-  session.proposals.set(id.toString(), proposal);
-  console.log(`  Proposal status: ${STATUS_NAMES[view.status] ?? view.status}`);
-  console.log(`  Approvals: ${view.approvals}`);
+  token.proposals.set(id.toString(), proposal);
+  remember(session.activity, 'info', `Token #${token.sessionId} proposal ${id}: ${STATUS_NAMES[view.status] ?? view.status}, approvals ${view.approvals}`);
   return proposal;
 };
 
 const approveWithSlots = async (
   session: Session,
-  rli: Interface,
+  ask: PromptReader,
   selectedProposal?: ProposalRecord,
+  status?: StatusRenderer,
 ): Promise<void> => {
-  const contract = ensureContract(session);
-  const signers = ensureSigners(session);
-  const summary = await ensureSummary(session);
-  const proposal = selectedProposal ?? await getProposalRecord(contract, session, rli);
-  const slots = await promptSignerSlots(rli);
+  const token = ensureActiveToken(session);
+  const signers = getSigningSigners(token);
+  const summary = await ensureSummary(session, status);
+  const proposal = selectedProposal ?? await getProposalRecord(session, ask, status);
+  const slots = await promptSignerSlots(ask);
   const messageHash = mintApprovalMessageHash(
     summary.instanceSalt,
     proposal.id,
@@ -396,132 +723,175 @@ const approveWithSlots = async (
     proposal.amount,
   );
 
-  console.log(`\n  Signing mint proposal ${proposal.id}`);
-  console.log(`  Amount: ${proposal.amount}`);
-  console.log(`  Recipient: ${recipientLabel(proposal.recipient)}`);
-  console.log(`  Approval message hash: ${bytesToHex(messageHash)}\n`);
+  remember(session.activity, 'info', `Signing proposal ${proposal.id}: ${proposal.amount} to ${recipientLabel(proposal.recipient)}`);
+  remember(session.activity, 'info', `Approval message hash: ${shortHex(bytesToHex(messageHash))}`);
 
   for (const slot of slots) {
     const signer = signers[slot - 1]!;
     const signature = jubjubSign(signer.secret, messageHash);
-    console.log(`  ${signer.label} signed: ${signatureLabel(signature)}`);
-    await withStatus(`Submitting ${signer.label} approval`, () =>
-      api.approveMintProposal(contract, proposal.id, signer.publicKey, signature),
+    remember(session.activity, 'info', `${signer.label} signed: ${signatureLabel(signature)}`);
+    await withLiveInfo(status, `Submitting ${signer.label} approval for proposal ${proposal.id}...`, () =>
+      api.approveMintProposal(token.contract, proposal.id, signer.publicKey, signature),
     );
   }
 
-  console.log(`\n  Submitted ${slots.length} approvals. Proposal ${proposal.id} is ready to execute.\n`);
+  proposal.status = 'Active';
+  proposal.approvals = BigInt(slots.length);
+  remember(session.activity, 'success', `Submitted ${slots.length} approvals for proposal ${proposal.id}.`);
 };
 
 const executeMintProposal = async (
   session: Session,
-  rli: Interface,
+  ask: PromptReader,
   selectedProposal?: ProposalRecord,
+  status?: StatusRenderer,
 ): Promise<void> => {
-  const contract = ensureContract(session);
-  const proposal = selectedProposal ?? await getProposalRecord(contract, session, rli);
-  const result = await withStatus('Executing approved mint proposal', () =>
-    api.executeMintProposal(contract, proposal.id),
+  const token = ensureActiveToken(session);
+  const proposal = selectedProposal ?? await getProposalRecord(session, ask, status);
+  const result = await withLiveInfo(status, `Executing approved mint proposal ${proposal.id}...`, () =>
+    api.executeMintProposal(token.contract, proposal.id),
   );
-  console.log(`\n  Proposal ${proposal.id} executed`);
-  console.log(`  Minted coin value: ${result.coin.value}`);
-  console.log(`  Minted coin color: ${bytesToHex(result.coin.color)}`);
-  console.log(`  Recipient: ${recipientLabel(proposal.recipient)}\n`);
+  proposal.status = 'Executed';
+  token.tokenColor = bytesToHex(result.coin.color);
+  remember(session.activity, 'success', `Proposal ${proposal.id} executed. Minted ${result.coin.value}.`);
+  remember(session.activity, 'info', `Minted coin color: ${shortHex(bytesToHex(result.coin.color))}`);
 };
 
-const burnShieldedTokenCoin = async (
+const burnToShieldedBurnAddress = async (
   walletCtx: WalletContext,
   session: Session,
-  rli: Interface,
+  ask: PromptReader,
+  status?: StatusRenderer,
 ): Promise<void> => {
-  const contract = ensureContract(session);
-  const summary = await ensureSummary(session);
-  const coins = await api.getSpendableShieldedTokenCoins(walletCtx.wallet, summary.tokenColor);
+  const token = ensureActiveToken(session);
+  const summary = await ensureSummary(session, status);
 
-  if (coins.length === 0) {
-    console.log(`\n  No spendable ${summary.tokenName} coins were found in this wallet.`);
-    console.log('  If you just minted, wait a moment for wallet sync and check the balance again.\n');
+  remember(session.activity, 'info', 'Burn-address flow sends tokens to shieldedBurnAddress().');
+  remember(session.activity, 'info', `Active token color: ${shortHex(summary.tokenColor)}.`);
+
+  const walletCoins = await withLiveInfo(status, 'Reading spendable wallet coins for burn-address flow...', () =>
+    api.getSpendableShieldedTokenCoins(walletCtx.wallet, summary.tokenColor),
+  );
+  if (walletCoins.length > 0) {
+    remember(session.activity, 'info', 'Wallet auto-select is available for demo burns.');
+    walletCoins.forEach((coin, index) => {
+      remember(session.activity, 'info', `[${index + 1}] value=${coin.value} mt=${coin.mt_index} nonce=${shortHex(bytesToHex(coin.nonce))}`);
+    });
+  } else {
+    remember(session.activity, 'info', 'No wallet coins found for this token; manual operator coin entry is available.');
+  }
+
+  const source = walletCoins.length > 0
+    ? (await ask('Burn source [1=auto-select wallet coin, 2=manual qualified operator coin] [1]')).trim() || '1'
+    : '2';
+
+  if (source === '1') {
+    const selected = walletCoins[await promptCoinIndex(ask, walletCoins)];
+    if (!selected) {
+      throw new Error('No wallet coin selected');
+    }
+    const amount = selected.value;
+    if (amount > summary.circulatingSupply) {
+      throw new Error(`Burn amount ${amount} exceeds circulating supply ${summary.circulatingSupply}`);
+    }
+
+    remember(session.activity, 'info', 'Wallet auto-select burns the selected coin whole to avoid untracked contract-owned change.');
+    const confirmed = await promptYesNo(
+      ask,
+      `Burn ${amount} from wallet coin mt_index=${selected.mt_index} to shielded burn address?`,
+      false,
+    );
+    if (!confirmed) {
+      remember(session.activity, 'info', 'Burn-address flow cancelled.');
+      return;
+    }
+
+    await withLiveInfo(status, `Submitting wallet burn-address transaction for ${amount}...`, () =>
+      api.burnWalletCoinToShieldedBurnAddress(token.contract, selected, amount),
+    );
+
+    const updatedSummary = await ensureSummary(session, status);
+    const balance = await api.getShieldedTokenBalance(walletCtx.wallet, summary.tokenColor);
+    remember(session.activity, 'success', `Wallet coin burn-address transaction submitted for ${amount}.`);
+    remember(session.activity, 'info', `Wallet balance ${balance}; burned ${updatedSummary.burnedSupply}; circulating ${updatedSummary.circulatingSupply}.`);
     return;
   }
 
-  console.log(`\n  Spendable ${summary.tokenName} coins`);
-  console.log('  Burn currently consumes the selected shielded coin whole.\n');
-  coins.forEach((coin, index) => {
-    console.log(
-      `  [${index + 1}] value=${coin.value} nonce=${shortHex(bytesToHex(coin.nonce))} commitment=${shortHex(coin.commitment)}`,
-    );
-  });
-  console.log();
+  if (source !== '2') {
+    throw new Error(`Invalid burn source: ${source}`);
+  }
 
-  const selected = coins[await promptCoinIndex(rli, coins)]!;
+  remember(session.activity, 'info', 'OZ-style operator burn: receiveShielded + sendShielded(shieldedBurnAddress()).');
+  remember(session.activity, 'info', 'This requires a contract-owned QualifiedShieldedCoinInfo from operator/indexer state.');
+  const coin = await promptQualifiedShieldedBurnCoin(ask, summary);
+  const amount = await promptBurnAmount(ask, coin.value);
+  if (amount > summary.circulatingSupply) {
+    throw new Error(`Burn amount ${amount} exceeds circulating supply ${summary.circulatingSupply}`);
+  }
+
   const confirmed = await promptYesNo(
-    rli,
-    `Burn the selected coin with value ${selected.value}?`,
+    ask,
+    `Submit OZ-style burn of ${amount} from contract-owned coin mt_index=${coin.mt_index}?`,
     false,
   );
   if (!confirmed) {
-    console.log('\n  Burn cancelled.\n');
+    remember(session.activity, 'info', 'Burn-address flow cancelled.');
     return;
   }
 
-  await withStatus('Burning selected shielded token coin', () =>
-    api.burnTokens(contract, selected),
+  await withLiveInfo(status, `Submitting operator burn-address transaction for ${amount}...`, () =>
+    api.burnTokensToShieldedBurnAddress(token.contract, coin, amount),
   );
 
-  const updatedSummary = await ensureSummary(session);
-  const balance = await api.getShieldedTokenBalance(walletCtx.wallet, summary.tokenColor);
-  console.log(`\n  Burned coin value: ${selected.value}`);
-  console.log(`  Token color: ${bytesToHex(selected.color)}`);
-  console.log(`  Burned supply: ${updatedSummary.burnedSupply}`);
-  console.log(`  Circulating supply: ${updatedSummary.circulatingSupply}`);
-  console.log(`  My shielded balance: ${balance}\n`);
+  const updatedSummary = await ensureSummary(session, status);
+  remember(session.activity, 'success', `Operator burn-address transaction submitted for ${amount}.`);
+  remember(session.activity, 'info', `Burned supply ${updatedSummary.burnedSupply}; circulating ${updatedSummary.circulatingSupply}.`);
+  if (coin.value > amount) {
+    remember(session.activity, 'info', 'Partial burn change is contract-owned and must be tracked by the operator flow.');
+  }
 };
 
 const showBalance = async (
   walletCtx: WalletContext,
   session: Session,
+  status?: StatusRenderer,
 ): Promise<void> => {
-  const summary = await ensureSummary(session);
-  const balance = await api.getShieldedTokenBalance(walletCtx.wallet, summary.tokenColor);
-  console.log(`\n  Token: ${summary.tokenName}`);
-  console.log(`  Token color: ${summary.tokenColor}`);
-  console.log(`  My shielded balance: ${balance}\n`);
+  const summary = await ensureSummary(session, status);
+  const balance = await withLiveInfo(status, 'Reading shielded token balance from wallet...', () =>
+    api.getShieldedTokenBalance(walletCtx.wallet, summary.tokenColor),
+  );
+  remember(session.activity, 'info', `${summary.tokenName} balance: ${balance}`);
+  remember(session.activity, 'info', `Token color: ${shortHex(summary.tokenColor)}`);
 };
 
 const showSummary = async (
   session: Session,
+  status?: StatusRenderer,
 ): Promise<void> => {
-  const contract = ensureContract(session);
-  const summary = await api.getContractSummary(contract);
-  session.tokenName = tokenNameToBytes(summary.tokenName);
-  session.domainSeparator = summary.domainSeparator;
-  session.instanceSalt = summary.instanceSalt;
-  session.tokenColor = summary.tokenColor;
+  const token = ensureActiveToken(session);
+  const summary = await withLiveInfo(status, 'Querying chain for contract summary...', () =>
+    api.getContractSummary(token.contract),
+  );
+  updateTokenFromSummary(token, summary);
 
-  console.log(`\n  Contract: ${contract.deployTxData.public.contractAddress}`);
-  console.log(`  Token name: ${summary.tokenName}`);
-  console.log(`  Token color: ${summary.tokenColor}`);
-  console.log(`  Shielded supply: ${summary.shieldedSupply}`);
-  console.log(`  Burned supply: ${summary.burnedSupply}`);
-  console.log(`  Circulating supply: ${summary.circulatingSupply}`);
-  console.log(`  Signers: ${summary.signerCount}`);
-  console.log(`  Threshold: ${summary.threshold}`);
-  console.log(`  Last proposal id: ${summary.nextProposalId}`);
-  console.log(`  Executed mint proposals: ${summary.executedCount}`);
-  console.log(`  Instance salt: ${bytesToHex(summary.instanceSalt)}\n`);
+  remember(session.activity, 'info', `Token #${token.sessionId} ${shortHex(getTokenAddress(token))} | ${summary.tokenName}`);
+  remember(session.activity, 'info', `Supply minted ${summary.shieldedSupply}, burned ${summary.burnedSupply}, circulating ${summary.circulatingSupply}.`);
+  remember(session.activity, 'info', `Policy ${summary.threshold} of ${summary.signerCount}; executed mints ${summary.executedCount}.`);
 };
 
 const joinExisting = async (
   providers: MultisigTokenProviders,
   session: Session,
-  rli: Interface,
+  ask: PromptReader,
+  status?: StatusRenderer,
 ): Promise<void> => {
-  const contractAddress = await rli.question('Enter the contract address (hex): ');
-  const contract = await withStatus('Joining contract', () =>
+  const contractAddress = await ask('Enter the contract address (hex)');
+  const contract = await withLiveInfo(status, `Joining contract ${shortHex(contractAddress.trim())}...`, () =>
     api.joinContract(providers, contractAddress.trim()),
   );
-  session.contract = contract;
-  await showSummary(session);
+  const token = addTokenRecord(session, contract, null, null, null);
+  remember(session.activity, 'info', `Joined token #${token.sessionId}. Mint approvals need local signer keys from the original ceremony.`);
+  await showSummary(session, status);
 };
 
 const guidedDemo = async (
@@ -529,147 +899,182 @@ const guidedDemo = async (
   walletCtx: WalletContext,
   session: Session,
   rli: Interface,
+  status?: StatusRenderer,
 ): Promise<void> => {
-  console.log(`\n${DIVIDER}`);
-  console.log('  Guided Key Ceremony + Shielded Mint Walkthrough');
-  console.log(`${DIVIDER}`);
-  console.log('  You will create one shielded token and control its minting with 2-of-3 signatures.');
-  console.log('  The wallet pays transaction fees; authorization comes from Schnorr signatures.\n');
+  const ask: PromptReader = (prompt) => askDashboard(walletCtx, session, rli, prompt);
+  remember(session.activity, 'info', 'Guided walkthrough started.');
+  remember(session.activity, 'info', 'You will create one shielded token controlled by 2-of-3 signatures.');
+  guide(session, 'Guided mode', 'Follow the highlighted guide strip; operational status stays in the activity panel.');
 
-  guideStep(
-    1,
-    'Key ceremony',
-    'In a real multisig, each signer would bring their own key. Here the CLI creates all three demo signer keys locally.',
+  await pauseDashboard(
+    walletCtx,
+    session,
+    rli,
+    'Step 1/8 Key ceremony: press Enter to generate three local demo signer keys.',
   );
-  await waitForEnter(rli, 'Press Enter to generate the three signer keys.');
   session.signers = generateKeys();
-  console.log('  Ceremony result: signer slots 1, 2, and 3 are now the mint authorities.');
-  console.log('  Policy for this demo: any 2 of those 3 signers can approve a mint.\n');
-  await waitForEnter(rli, 'Review the public keys above, then press Enter to continue.');
+  remember(session.activity, 'success', 'Signer slots 1, 2, and 3 are now mint authorities.');
+  remember(session.activity, 'info', 'Policy: any 2 of the 3 demo signers can approve a mint.');
+  await pauseDashboard(walletCtx, session, rli, 'Review signer panel, then press Enter to continue.');
 
-  guideStep(
-    2,
-    'Name and deploy the token',
-    'Choose the token name. The name becomes the token domain separator used to derive its token color.',
-  );
-  const tokenName = await promptTokenName(rli);
-  await deployCurrent(providers, session, tokenName);
-  await waitForEnter(rli, 'Press Enter to propose the first shielded mint.');
+  guide(session, 'Step 2/8', 'Name and deploy the token. The name becomes the token domain separator.');
+  const tokenName = await promptTokenName(ask);
+  await deployCurrent(providers, session, tokenName, status);
+  await pauseDashboard(walletCtx, session, rli, 'Press Enter to propose the first shielded mint.');
 
-  guideStep(
-    3,
-    'Choose amount and recipient',
-    'Pick how many shielded tokens to mint and who receives them. The recipient is part of what the signers approve.',
-  );
-  const proposal = await createMintProposal(walletCtx, session, rli);
-  await waitForEnter(rli, 'Press Enter to start the signing ceremony.');
+  guide(session, 'Step 3/8', 'Choose the mint amount and the exact recipient the signers are approving.');
+  const proposal = await createMintProposal(walletCtx, session, ask, status);
+  await pauseDashboard(walletCtx, session, rli, 'Press Enter to start the signing ceremony.');
 
-  guideStep(
-    4,
-    'Signing ceremony',
-    'Choose any two signer slots. The CLI signs the exact mint intent with those local keys.',
-  );
-  await approveWithSlots(session, rli, proposal);
-  await waitForEnter(rli, 'Press Enter to execute the approved mint.');
+  guide(session, 'Step 4/8', 'Choose any two signer slots. The CLI signs locally, then submits the approvals.');
+  await approveWithSlots(session, ask, proposal, status);
+  await pauseDashboard(walletCtx, session, rli, 'Press Enter to execute the approved mint.');
 
-  guideStep(
-    5,
-    'Execute mint',
-    'After two valid approvals are recorded, execution mints the shielded ZSwap token to the approved recipient.',
-  );
-  await executeMintProposal(session, rli, proposal);
-  await waitForEnter(rli, 'Press Enter to review the contract state.');
+  guide(session, 'Step 5/8', 'Execute the approved proposal. This is where the shielded token coin is minted.');
+  await executeMintProposal(session, ask, proposal, status);
+  await pauseDashboard(walletCtx, session, rli, 'Press Enter to review the contract state.');
 
-  guideStep(
-    6,
-    'Review contract state',
-    'The summary confirms token supply, signer threshold, and executed proposal count.',
-  );
-  await showSummary(session);
-  await waitForEnter(rli, 'Press Enter to check your wallet balance.');
+  guide(session, 'Step 6/8', 'Review supply, burn totals, policy, and executed mint count from the active contract.');
+  await showSummary(session, status);
+  await pauseDashboard(walletCtx, session, rli, 'Press Enter to check your wallet balance.');
 
-  guideStep(
-    7,
-    'Check wallet balance',
-    'If you minted to your shielded wallet, your private balance should show the new token after wallet sync.',
-  );
-  await showBalance(walletCtx, session);
+  guide(session, 'Step 7/8', 'Check the active token balance in your shielded wallet.');
+  await showBalance(walletCtx, session, status);
 
-  guideStep(
-    8,
-    'Optional burn',
-    'Burn lets the holder of a shielded coin remove that coin from circulation. The multisig is not needed because ownership is enforced by ZSwap.',
-  );
-  if (await promptYesNo(rli, 'Burn one of your spendable token coins now?', false)) {
-    await burnShieldedTokenCoin(walletCtx, session, rli);
+  guide(session, 'Step 8/8', 'Optionally burn tokens by sending them to shieldedBurnAddress().');
+  if (await promptYesNo(ask, 'Burn tokens to the shielded burn address now?', false)) {
+    await burnToShieldedBurnAddress(walletCtx, session, ask, status);
   } else {
-    console.log('\n  Skipping burn. You can use menu option 10 later.\n');
+    remember(session.activity, 'info', 'Skipping burn. Use option 10 later.');
   }
-  console.log('  Guided walkthrough complete. You can rerun it or use the manual actions.\n');
+  guide(session, 'Complete', 'Guided walkthrough complete. Use n/p to cycle session tokens or choose another action.');
+  remember(session.activity, 'success', 'Guided walkthrough complete.');
 };
 
 const mainLoop = async (
   providers: MultisigTokenProviders,
   walletCtx: WalletContext,
   rli: Interface,
+  initialActivity: DashboardMessage[],
 ): Promise<void> => {
   const session: Session = {
     signers: null,
-    contract: null,
-    tokenName: null,
-    domainSeparator: null,
-    instanceSalt: null,
-    tokenColor: null,
-    proposals: new Map(),
+    tokens: [],
+    activeTokenIndex: 0,
+    activity: [...initialActivity],
+    guidance: {
+      title: 'Ready',
+      body: 'Choose guided mode for the walkthrough, or use the manual commands below.',
+      tone: 'guide',
+    },
   };
+  let message: DashboardMessage | undefined;
+
+  const showStatus: StatusRenderer = async (statusMessage) => {
+    remember(session.activity, statusMessage.type, statusMessage.text);
+    await renderLiveDashboard(walletCtx, session);
+  };
+  const ask: PromptReader = (prompt) => askDashboard(walletCtx, session, rli, prompt);
 
   while (true) {
-    const dustLabel = await getDustLabel(walletCtx.wallet);
-    if (dustLabel) console.log(`\n  DUST: ${dustLabel}`);
-    const choice = await rli.question(MENU);
+    await renderLiveDashboard(walletCtx, session, message);
+    message = undefined;
+    const choice = await rli.question(dashboardPrompt('Select action'));
     try {
       switch (choice.trim()) {
         case '1':
-          await guidedDemo(providers, walletCtx, session, rli);
+          await guidedDemo(providers, walletCtx, session, rli, showStatus);
+          message = { type: 'success', text: 'Guided walkthrough complete. Wallet values update live; refresh reads contract state.' };
           break;
         case '2':
           session.signers = generateKeys();
+          guide(session, 'Keys staged', 'Fresh demo signer keys will control the next token you deploy.');
+          message = { type: 'success', text: 'Generated three fresh demo signer keys for the next deploy. Existing session tokens keep their own key ceremony.' };
           break;
         case '3': {
-          const tokenName = await promptTokenName(rli);
-          await deployCurrent(providers, session, tokenName);
+          guide(session, 'Deploy token', 'Choose a token name. The current staged signer keys will become its 2-of-3 mint authority.');
+          const tokenName = await promptTokenName(ask);
+          await deployCurrent(providers, session, tokenName, showStatus);
+          message = { type: 'success', text: 'Contract deployed. Live token state will appear in the dashboard.' };
           break;
         }
         case '4':
-          await joinExisting(providers, session, rli);
+          guide(session, 'Join token', 'Paste an existing contract address. Joined tokens are view/burn only unless deployed in this session.');
+          await joinExisting(providers, session, ask, showStatus);
+          message = { type: 'success', text: 'Joined contract. Contract state was refreshed from chain.' };
           break;
         case '5':
-          await createMintProposal(walletCtx, session, rli);
+          guide(session, 'Create proposal', 'Create a mint proposal for the active token, including amount and recipient.');
+          await createMintProposal(walletCtx, session, ask, showStatus);
+          message = { type: 'success', text: 'Mint proposal created. Use refresh to reread approval/status from chain.' };
           break;
         case '6':
-          await approveWithSlots(session, rli);
+          guide(session, 'Approve proposal', 'Choose any two signer slots for the active token ceremony.');
+          await approveWithSlots(session, ask, undefined, showStatus);
+          message = { type: 'success', text: 'Approvals submitted. Use refresh to reread approval count from chain.' };
           break;
         case '7':
-          await executeMintProposal(session, rli);
+          guide(session, 'Execute mint', 'Execute an active proposal after the threshold approvals have been submitted.');
+          await executeMintProposal(session, ask, undefined, showStatus);
+          message = { type: 'success', text: 'Mint executed. Wallet balance updates live; refresh rereads supply from chain.' };
           break;
         case '8':
-          await showSummary(session);
+          guide(session, 'Refresh chain', 'Reading the active token summary and tracked proposal rows from chain.');
+          await refreshContractDashboardState(session, showStatus);
+          message = { type: 'success', text: 'Contract and proposal rows refreshed from chain.' };
           break;
         case '9':
-          await showBalance(walletCtx, session);
+          guide(session, 'Refresh wallet', 'Reading shielded balances and spendable coins from the wallet state.');
+          await showStatus({ type: 'info', text: 'Refreshing wallet shielded balance and spendable coins...' });
+          message = { type: 'success', text: 'Wallet balance refreshed from live wallet state.' };
           break;
         case '10':
-          await burnShieldedTokenCoin(walletCtx, session, rli);
+          guide(session, 'Burn', 'Auto-select a wallet coin or enter an operator qualified coin, then send to shieldedBurnAddress().');
+          await burnToShieldedBurnAddress(walletCtx, session, ask, showStatus);
+          message = { type: 'success', text: 'Burn submitted to shieldedBurnAddress(). Supply was refreshed from chain.' };
           break;
+        case 'n':
+        case 'N':
+        case ']':
+        case '12': {
+          const token = cycleActiveToken(session, 1);
+          if (token) {
+            guide(session, 'Active token', `Now viewing token #${token.sessionId}: ${getTokenName(token)}.`);
+          } else {
+            guide(session, 'No tokens', 'Deploy or join a token before cycling.', 'warn');
+          }
+          message = token
+            ? { type: 'info', text: `Active token is now #${token.sessionId}: ${getTokenName(token)}.` }
+            : { type: 'error', text: 'No session tokens to cycle. Deploy or join one first.' };
+          break;
+        }
+        case 'p':
+        case 'P':
+        case '[':
+        case '13': {
+          const token = cycleActiveToken(session, -1);
+          if (token) {
+            guide(session, 'Active token', `Now viewing token #${token.sessionId}: ${getTokenName(token)}.`);
+          } else {
+            guide(session, 'No tokens', 'Deploy or join a token before cycling.', 'warn');
+          }
+          message = token
+            ? { type: 'info', text: `Active token is now #${token.sessionId}: ${getTokenName(token)}.` }
+            : { type: 'error', text: 'No session tokens to cycle. Deploy or join one first.' };
+          break;
+        }
         case '11':
           return;
         default:
-          console.log(`  Invalid choice: ${choice}`);
+          guide(session, 'Invalid choice', 'Use one of the command keys shown in the guide strip.', 'warn');
+          message = { type: 'error', text: `Invalid choice: ${choice}` };
       }
     } catch (e) {
       const raw = e instanceof Error ? e.message : String(e);
       const assertMatch = raw.match(/failed assert:\s*(.+)/);
-      console.log(`\n  Failed: ${assertMatch ? assertMatch[1] : raw}\n`);
+      const text = assertMatch ? assertMatch[1] : raw;
+      guide(session, 'Needs attention', text, 'warn');
+      message = { type: 'error', text };
     }
   }
 };
@@ -678,23 +1083,23 @@ export const run = async (config: Config, _logger: Logger): Promise<void> => {
   logger = _logger;
   api.setLogger(_logger);
 
-  console.log(BANNER);
-
   const rli = createInterface({ input, output, terminal: true });
+  const startupActivity: DashboardMessage[] = [
+    { type: 'info', text: `Starting multisig token CLI on ${networkLabel(config)}.` },
+  ];
 
   try {
-    const walletCtx = await buildWallet(config, rli);
+    enterDashboardScreen();
+    renderSplash('startup', 'Preparing Midnight multisig token CLI...', startupActivity);
+    const walletCtx = await buildWallet(config, rli, startupActivity);
     if (walletCtx === null) return;
 
-    console.log('\n  Wallet ready');
-    console.log(`  Unshielded address: ${walletCtx.unshieldedKeystore.getBech32Address()}`);
-    console.log(`  Shielded ZSwap key: ${bytesToHex(getWalletZswapKey(walletCtx))}\n`);
-
     try {
-      const providers = await withStatus('Configuring providers', () =>
-        api.configureProviders(walletCtx, config),
-      );
-      await mainLoop(providers, walletCtx, rli);
+      remember(startupActivity, 'info', 'Configuring providers...');
+      renderSplash('providers', 'Configuring Midnight providers...', startupActivity);
+      const providers = await silenceTerminalOutput(() => api.configureProviders(walletCtx, config));
+      remember(startupActivity, 'success', 'Providers ready.');
+      await mainLoop(providers, walletCtx, rli, startupActivity);
     } finally {
       try {
         await walletCtx.wallet.stop();
@@ -705,6 +1110,7 @@ export const run = async (config: Config, _logger: Logger): Promise<void> => {
   } finally {
     rli.close();
     rli.removeAllListeners();
+    exitDashboardScreen();
     logger.info('Goodbye.');
   }
 };

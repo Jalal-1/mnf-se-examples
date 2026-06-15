@@ -211,15 +211,38 @@ export circuit executeMintProposal(id: Uint<64>): ShieldedCoinInfo {
   );
 }
 
-export circuit burn(coin: ShieldedCoinInfo): [] {
-  assert(coin.value > 0, "MultisigToken: amount must be greater than zero");
+export circuit burnWalletCoinToShieldedBurnAddress(
+  coin: ShieldedCoinInfo,
+  amount: Uint<64>
+): [] {
+  assert(amount > 0, "MultisigToken: amount must be greater than zero");
   assert(coin.color == tokenType(_domainSeparator, kernel.self()), "MultisigToken: wrong token color");
-
-  const burnAmount = coin.value as Uint<64>;
-  assert(_shieldedSupply - _burnedSupply >= burnAmount, "MultisigToken: burn exceeds supply");
+  assert(coin.value >= amount, "MultisigToken: insufficient coin value");
+  assert(_shieldedSupply - _burnedSupply >= amount, "MultisigToken: burn exceeds supply");
 
   receiveShielded(disclose(coin));
-  _burnedSupply = disclose((_burnedSupply + burnAmount) as Uint<64>);
+  sendImmediateShielded(disclose(coin), shieldedBurnAddress(), disclose(amount));
+  _burnedSupply = disclose((_burnedSupply + amount) as Uint<64>);
+}
+
+export circuit burnToShieldedBurnAddress(
+  coin: QualifiedShieldedCoinInfo,
+  amount: Uint<64>
+): [] {
+  assert(amount > 0, "MultisigToken: amount must be greater than zero");
+  assert(coin.color == tokenType(_domainSeparator, kernel.self()), "MultisigToken: wrong token color");
+  assert(coin.value >= amount, "MultisigToken: insufficient coin value");
+  assert(_shieldedSupply - _burnedSupply >= amount, "MultisigToken: burn exceeds supply");
+
+  const receivedCoin = ShieldedCoinInfo {
+    nonce: coin.nonce,
+    color: coin.color,
+    value: coin.value
+  };
+
+  receiveShielded(disclose(receivedCoin));
+  sendShielded(disclose(coin), shieldedBurnAddress(), disclose(amount));
+  _burnedSupply = disclose((_burnedSupply + amount) as Uint<64>);
 }
 
 export circuit getSummary(): ContractSummary {

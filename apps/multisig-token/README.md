@@ -33,9 +33,11 @@ Choose `Guided key ceremony + shielded mint walkthrough` from the CLI. The CLI p
 5. Approval submission: produce two Schnorr signatures locally and submit both approvals.
 6. Execute: mint the shielded ZSwap token after the threshold is met.
 7. Review: inspect supply and wallet balance.
-8. Optional burn: choose one spendable shielded token coin from your wallet and burn it.
+8. Optional burn: choose a spendable shielded token coin from your wallet and send the burn amount to `shieldedBurnAddress()`.
 
 For the simplest demo, press Enter through the ceremony prompts, use the default token name, mint `100` tokens, choose recipient `1` for your own shielded wallet, and press Enter at the signer prompt to sign with signers `1` and `2`.
+
+The CLI keeps a fixed dashboard on screen while you work. It shows the active wallet, active token, signer ceremony, tracked proposals, recent activity, and a bottom guide strip for the current instruction. If you deploy or join more than one token in the same session, use `n` and `p` to cycle the active token. Tokens deployed by this CLI keep their local demo signer ceremony for the session; joined contracts are view/burn only unless they were deployed in the same session.
 
 ## Recipients
 
@@ -52,9 +54,13 @@ Contract recipients are useful for treasury-style flows. This app focuses on mul
 
 ## Burn
 
-Burning is holder-controlled. The CLI lists spendable shielded coins in your wallet for this token color, asks which coin to burn, and submits the selected coin to the contract's `burn` circuit.
+The CLI's `burn` option sends tokens to `shieldedBurnAddress()`.
 
-The current demo burns the selected shielded coin whole. If you mint `100` tokens as one coin, burning that coin burns all `100`. Partial burns would require a split/change flow and are intentionally left out of this simple example.
+For the easiest demo, choose wallet auto-select. The CLI will show your wallet coins, including `value`, `nonce`, and `mt_index`, then call the wallet-friendly `receiveShielded + sendImmediateShielded(shieldedBurnAddress())` path. Wallet auto-select burns the selected coin whole so the example does not create untracked contract-owned change.
+
+The burn menu also includes a manual operator path that mirrors the OZ multisig V3 pattern: `receiveShielded + sendShielded(shieldedBurnAddress())`. That path requires a contract-owned `QualifiedShieldedCoinInfo`, including `nonce`, `value`, and `mt_index`, from the operator/indexer UTXO tracking flow. This app does not add a local manifest for those operator coins.
+
+If you mint `100` tokens as one wallet coin, the wallet demo burns the full `100`. Partial burns can create contract-owned change, which needs operator tracking for follow-up spends.
 
 ## Manual Flow
 
@@ -62,8 +68,10 @@ Use the manual menu to:
 
 1. Generate signer keys.
 2. Deploy a named shielded token mint controller.
-3. Create one or more mint proposals.
-4. Approve a proposal with any two signer slots.
-5. Execute the proposal.
-6. View contract supply and wallet balance.
-7. Burn one of your spendable shielded token coins.
+3. Deploy or join additional token controllers.
+4. Cycle the active token with `n` and `p`.
+5. Create one or more mint proposals for the active token.
+6. Approve a proposal with any two signer slots when local signer keys are available.
+7. Execute the proposal.
+8. Refresh active contract supply and wallet balance.
+9. Burn one of your spendable shielded token coins to the shielded burn address.

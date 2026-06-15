@@ -77,7 +77,11 @@ export type ShieldedCoin = {
   readonly value: bigint;
 };
 
-export type SpendableShieldedCoin = ShieldedCoin & {
+export type QualifiedShieldedCoin = ShieldedCoin & {
+  readonly mt_index: bigint;
+};
+
+export type SpendableShieldedCoin = QualifiedShieldedCoin & {
   readonly commitment: string;
   readonly nullifier: string;
 };
@@ -150,12 +154,24 @@ export const executeMintProposal = async (
   };
 };
 
-export const burnTokens = async (
+export const burnWalletCoinToShieldedBurnAddress = async (
   contract: DeployedMultisigTokenContract,
   coin: ShieldedCoin,
+  amount: bigint,
 ): Promise<FinalizedTxData> => {
-  logger.info(`Burning shielded coin with value ${coin.value}...`);
-  const result = await contract.callTx.burn(coin);
+  logger.info(`Burning ${amount} from wallet coin via shielded burn address...`);
+  const result = await contract.callTx.burnWalletCoinToShieldedBurnAddress(coin, amount);
+  logger.info(`Transaction ${result.public.txId} added in block ${result.public.blockHeight}`);
+  return result.public;
+};
+
+export const burnTokensToShieldedBurnAddress = async (
+  contract: DeployedMultisigTokenContract,
+  coin: QualifiedShieldedCoin,
+  amount: bigint,
+): Promise<FinalizedTxData> => {
+  logger.info(`Burning ${amount} via shielded burn address...`);
+  const result = await contract.callTx.burnToShieldedBurnAddress(coin, amount);
   logger.info(`Transaction ${result.public.txId} added in block ${result.public.blockHeight}`);
   return result.public;
 };
@@ -222,7 +238,7 @@ export const getSpendableShieldedTokenCoins = async (
   return (state.shielded?.availableCoins ?? [])
     .filter(({ coin }) => coin.type === tokenColor && coin.value > 0n)
     .map(({ coin, commitment, nullifier }) => ({
-      ...ledger.encodeShieldedCoinInfo(coin),
+      ...ledger.encodeQualifiedShieldedCoinInfo(coin),
       commitment,
       nullifier,
     }));
