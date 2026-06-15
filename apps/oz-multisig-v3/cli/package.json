@@ -7,10 +7,10 @@
     "mnf-oz-multisig-v3": "dist/main.js"
   },
   "scripts": {
-    "standalone": "node --loader ts-node/esm src/main.ts standalone",
-    "undeployed": "node --loader ts-node/esm src/main.ts undeployed",
-    "preview": "node --loader ts-node/esm src/main.ts preview",
-    "preprod": "node --loader ts-node/esm src/main.ts preprod",
+    "standalone": "node --no-warnings --loader ts-node/esm src/main.ts standalone",
+    "undeployed": "node --no-warnings --loader ts-node/esm src/main.ts undeployed",
+    "preview": "node --no-warnings --loader ts-node/esm src/main.ts preview",
+    "preprod": "node --no-warnings --loader ts-node/esm src/main.ts preprod",
     "build": "rm -rf dist && tsc --project tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
