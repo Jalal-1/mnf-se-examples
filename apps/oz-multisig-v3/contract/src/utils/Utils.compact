@@ -1,0 +1,60 @@
+// SPDX-License-Identifier: MIT
+// Based on OpenZeppelin Compact Contracts v0.0.1-alpha.1 (utils/Utils.compact)
+
+pragma language_version >= 0.21.0;
+
+module Utils {
+  import CompactStandardLibrary;
+
+  export pure circuit isKeyOrAddressZero(
+    keyOrAddress: Either<ZswapCoinPublicKey, ContractAddress>
+  ): Boolean {
+    return isContractAddress(keyOrAddress)
+      ? default<ContractAddress> == keyOrAddress.right
+      : default<ZswapCoinPublicKey> == keyOrAddress.left;
+  }
+
+  export pure circuit isKeyZero(key: ZswapCoinPublicKey): Boolean {
+    const zero = default<ZswapCoinPublicKey>;
+    return zero == key;
+  }
+
+  export pure circuit isKeyOrAddressEqual(
+    keyOrAddress: Either<ZswapCoinPublicKey, ContractAddress>,
+    other: Either<ZswapCoinPublicKey, ContractAddress>
+  ): Boolean {
+    if (keyOrAddress.is_left && other.is_left) {
+      return keyOrAddress.left == other.left;
+    } else if (!keyOrAddress.is_left && !other.is_left) {
+      return keyOrAddress.right == other.right;
+    } else {
+      return false;
+    }
+  }
+
+  export pure circuit isContractAddress(
+    keyOrAddress: Either<ZswapCoinPublicKey, ContractAddress>
+  ): Boolean {
+    return !keyOrAddress.is_left;
+  }
+
+  export pure circuit emptyString(): Opaque<"string"> {
+    return default<Opaque<"string">>;
+  }
+
+  export pure circuit canonicalize<T1, T2>(
+    value: Either<T1, T2>
+  ): Either<T1, T2> {
+    return value.is_left
+      ? Either<T1, T2>{ is_left: true, left: value.left, right: default<T2> }
+      : Either<T1, T2>{ is_left: false, left: default<T1>, right: value.right };
+  }
+
+  export circuit selfAsRecipient(): Either<ZswapCoinPublicKey, ContractAddress> {
+    return right<ZswapCoinPublicKey, ContractAddress>(kernel.self());
+  }
+
+  export pure circuit UINT128_MAX(): Uint<128> {
+    return 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
+  }
+}

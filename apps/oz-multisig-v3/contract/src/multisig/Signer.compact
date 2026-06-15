@@ -1,0 +1,78 @@
+// SPDX-License-Identifier: MIT
+// Based on OpenZeppelin Compact Contracts v0.0.1-alpha.1 (multisig/Signer.compact)
+
+pragma language_version >= 0.21.0;
+
+module Signer<T> {
+  import CompactStandardLibrary;
+  import "../security/Initializable" prefix Initializable_;
+
+  export ledger _signers: Set<T>;
+  export ledger _signerCount: Uint<8>;
+  export ledger _threshold: Uint<8>;
+
+  export circuit initialize<#n>(
+    signers: Vector<n, T>,
+    thresh: Uint<8>
+  ): [] {
+    Initializable_initialize();
+
+    for (const signer of signers) {
+      _addSigner(signer);
+    }
+
+    _changeThreshold(thresh);
+  }
+
+  export circuit assertSigner(caller: T): [] {
+    Initializable_assertInitialized();
+    assert(isSigner(caller), "Signer: not a signer");
+  }
+
+  export circuit assertThresholdMet(approvalCount: Uint<8>): [] {
+    Initializable_assertInitialized();
+    assert(_threshold != 0, "Signer: threshold not set");
+    assert(approvalCount >= _threshold, "Signer: threshold not met");
+  }
+
+  export circuit getSignerCount(): Uint<8> {
+    Initializable_assertInitialized();
+    return _signerCount;
+  }
+
+  export circuit getThreshold(): Uint<8> {
+    Initializable_assertInitialized();
+    return _threshold;
+  }
+
+  export circuit isSigner(account: T): Boolean {
+    return _signers.member(disclose(account));
+  }
+
+  export circuit _addSigner(signer: T): [] {
+    assert(!isSigner(signer), "Signer: signer already active");
+
+    _signers.insert(disclose(signer));
+    _signerCount = _signerCount + 1 as Uint<8>;
+  }
+
+  export circuit _removeSigner(signer: T): [] {
+    assert(isSigner(signer), "Signer: not a signer");
+
+    const newCount = _signerCount - 1 as Uint<8>;
+    assert(newCount >= _threshold, "Signer: removal would breach threshold");
+
+    _signers.remove(disclose(signer));
+    _signerCount = newCount;
+  }
+
+  export circuit _changeThreshold(newThreshold: Uint<8>): [] {
+    assert(newThreshold <= _signerCount, "Signer: threshold exceeds signer count");
+    _setThreshold(newThreshold);
+  }
+
+  export circuit _setThreshold(newThreshold: Uint<8>): [] {
+    assert(newThreshold != 0, "Signer: threshold must not be zero");
+    _threshold = disclose(newThreshold);
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "@mnf-se/oz-multisig-v3-contract",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "compact": "compact compile +0.31.0 src/multisig/presets/ShieldedMultiSigV3.compact src/managed/oz-multisig-v3",
+    "build": "rm -rf dist && tsc --project tsconfig.build.json && cp -Rf ./src/managed ./dist/managed && cp -Rf ./src/multisig ./dist/multisig && cp -Rf ./src/security ./dist/security && cp -Rf ./src/utils ./dist/utils",
+    "typecheck": "tsc --noEmit"
+  }
+}

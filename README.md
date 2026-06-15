@@ -17,6 +17,7 @@ Deployable apps and an AI coding knowledge base for building Midnight DApps.
 | [**access-control**](apps/access-control/) | Role-based access control | OZ AccessControl, Pausable, role grants/revokes | Working |
 | [**multisig**](apps/multisig/) | Guided key ceremony + 2-of-3 Schnorr multisig | Jubjub keys, Schnorr signatures, proposal approvals | Working |
 | [**multisig-token**](apps/multisig-token/) | Multisig-controlled shielded token mint | ZSwap minting, token names, Schnorr approvals, wallet/contract recipients | Working |
+| [**oz-multisig-v3**](apps/oz-multisig-v3/) | OZ ShieldedMultiSigV3 mint/burn harness | Signer commitments, stub ECDSA approvals, shielded burn address | Working |
 
 ## Web UI
 
@@ -57,6 +58,7 @@ npm run token
 npm run election
 npm run multisig
 npm run multisig-token
+npm run oz-multisig-v3
 
 # Or launch the web UI
 npm run web
@@ -77,6 +79,7 @@ npm run web
 | `npm run access-control` | Run access control on local undeployed network |
 | `npm run multisig` | Run guided key ceremony + Schnorr multisig on local undeployed network |
 | `npm run multisig-token` | Run multisig-controlled shielded token mint on local undeployed network |
+| `npm run oz-multisig-v3` | Run the exact OZ ShieldedMultiSigV3 mint/burn harness on local undeployed network |
 
 ### Run Apps (Testnet)
 
@@ -91,6 +94,8 @@ npm run multisig:preview       # Preview network
 npm run multisig:preprod       # Preprod network
 npm run multisig-token:preview # Preview network
 npm run multisig-token:preprod # Preprod network
+npm run oz-multisig-v3:preview # Preview network
+npm run oz-multisig-v3:preprod # Preprod network
 ```
 
 Fund your wallet from the [Preview faucet](https://faucet.preview.midnight.network) or [Preprod faucet](https://faucet.preprod.midnight.network).
@@ -123,6 +128,7 @@ Fund your wallet from the [Preview faucet](https://faucet.preview.midnight.netwo
 | `npm run build:counter` | Compile counter contract only |
 | `npm run build:multisig` | Compile Schnorr multisig contract only |
 | `npm run build:multisig-token` | Compile multisig shielded token mint contract only |
+| `npm run build:oz-multisig-v3` | Compile OZ ShieldedMultiSigV3 harness contract only |
 | `npm run typecheck` | Type-check all CLI code |
 
 ## SDK Versions
@@ -170,6 +176,7 @@ mnf-se-examples/
 ├── apps/access-control/    # Role-based access control + Pausable
 ├── apps/multisig/          # Guided key ceremony + 2-of-3 Schnorr multisig
 ├── apps/multisig-token/    # Multisig-controlled shielded token mint
+├── apps/oz-multisig-v3/    # OZ ShieldedMultiSigV3 mint/burn harness
 ├── apps/web/               # React web UI (Vite + Tailwind)
 ├── docker/                 # Docker Compose files
 │   ├── proof-server.yml    # Proof server only (for preview/preprod)

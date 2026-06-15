@@ -1,0 +1,177 @@
+// SPDX-License-Identifier: MIT
+// Based on OpenZeppelin Compact Contracts v0.0.1-alpha.1
+// (multisig/presets/ShieldedMultiSigV3.compact).
+
+pragma language_version >= 0.21.0;
+
+import CompactStandardLibrary;
+
+import "../Signer"<Bytes<32>> prefix Signer_;
+import "../../utils/Utils" prefix Utils_;
+
+export { ZswapCoinPublicKey };
+
+struct VerificationState {
+  validCount: Uint<8>,
+  prevCommitment: Bytes<32>,
+  msgHash: Bytes<32>
+}
+
+struct SignerCommitmentInput {
+  pk: Bytes<64>,
+  salt: Bytes<32>,
+  domain: Bytes<32>
+}
+
+export ledger _counter: Counter;
+export ledger _coinNonce: Bytes<32>;
+export ledger _instanceSalt: Bytes<32>;
+export sealed ledger _tokenDomain: Bytes<32>;
+
+constructor(
+  instanceSalt: Bytes<32>,
+  initCoinNonce: Bytes<32>,
+  tokenDomain: Bytes<32>,
+  signerCommitments: Vector<3, Bytes<32>>,
+  thresh: Uint<8>
+) {
+  assert(
+    thresh <= 2,
+    "Multisig: threshold cannot exceed 2 (circuits verify at most 2 signatures)"
+  );
+  _instanceSalt = disclose(instanceSalt);
+  _coinNonce = disclose(initCoinNonce);
+  _tokenDomain = disclose(tokenDomain);
+  Signer_initialize<3>(signerCommitments, thresh);
+}
+
+export circuit mint(
+  amount: Uint<64>,
+  recipient: Either<ZswapCoinPublicKey, ContractAddress>,
+  pubkeys: Vector<2, Bytes<64>>,
+  signatures: Vector<2, Bytes<64>>
+): [] {
+  const opNonce = _counter;
+  _counter.increment(1);
+
+  const canonRecipient = Utils_canonicalize<ZswapCoinPublicKey, ContractAddress>(recipient);
+  const recipientHash = persistentHash<Either<ZswapCoinPublicKey, ContractAddress>>(canonRecipient);
+
+  const msgHash = persistentHash<Vector<5, Bytes<32>>>([
+    pad(32, "multisig:mint:"),
+    kernel.self().bytes,
+    recipientHash,
+    opNonce as Bytes<32>,
+    amount as Bytes<32>
+  ]);
+
+  const initialState = VerificationState {
+    validCount: 0 as Uint<8>,
+    prevCommitment: pad(32, ""),
+    msgHash: msgHash
+  };
+
+  const finalState = fold(verifySignature, initialState, pubkeys, signatures);
+  Signer_assertThresholdMet(finalState.validCount);
+
+  _coinNonce = evolveNonce(_counter, _coinNonce);
+  mintShieldedToken(_tokenDomain, disclose(amount), _coinNonce, disclose(canonRecipient));
+}
+
+export circuit burn(
+  coin: QualifiedShieldedCoinInfo,
+  amount: Uint<64>,
+  pubkeys: Vector<2, Bytes<64>>,
+  signatures: Vector<2, Bytes<64>>
+): [] {
+  const opNonce = _counter;
+  _counter.increment(1);
+
+  const msgHash = persistentHash<Vector<4, Bytes<32>>>([
+    pad(32, "multisig:burn:"),
+    kernel.self().bytes,
+    opNonce as Bytes<32>,
+    amount as Bytes<32>
+  ]);
+
+  const initialState = VerificationState {
+    validCount: 0 as Uint<8>,
+    prevCommitment: pad(32, ""),
+    msgHash: msgHash
+  };
+
+  const finalState = fold(verifySignature, initialState, pubkeys, signatures);
+  Signer_assertThresholdMet(finalState.validCount);
+
+  assert(coin.color == tokenType(_tokenDomain, kernel.self()), "Multisig: coin not from this contract");
+  assert(coin.value >= amount, "Multisig: insufficient coin value");
+
+  const _coin = ShieldedCoinInfo {
+    nonce: coin.nonce,
+    color: coin.color,
+    value: coin.value
+  };
+  receiveShielded(disclose(_coin));
+  sendShielded(disclose(coin), shieldedBurnAddress(), disclose(amount));
+}
+
+circuit verifySignature(
+  state: VerificationState,
+  pubkey: Bytes<64>,
+  signature: Bytes<64>
+): VerificationState {
+  const commitment = _calculateSignerId(pubkey, _instanceSalt);
+
+  assert(commitment != state.prevCommitment, "Multisig: duplicate signer");
+  Signer_assertSigner(commitment);
+  assert(stubVerifySignature(pubkey, state.msgHash, signature), "Multisig: invalid signature");
+
+  return VerificationState {
+    validCount: state.validCount + 1 as Uint<8>,
+    prevCommitment: commitment,
+    msgHash: state.msgHash
+  };
+}
+
+export pure circuit _calculateSignerId(
+  pk: Bytes<64>,
+  salt: Bytes<32>
+): Bytes<32> {
+  return persistentHash<SignerCommitmentInput>(SignerCommitmentInput {
+    pk: pk,
+    salt: salt,
+    domain: pad(32, "Multisig:signer:")
+  });
+}
+
+circuit stubVerifySignature(
+  pubkey: Bytes<64>,
+  msgHash: Bytes<32>,
+  signature: Bytes<64>
+): Boolean {
+  return true;
+}
+
+export circuit getNonce(): Uint<64> {
+  return _counter;
+}
+
+export circuit getTokenDomain(): Bytes<32> {
+  return _tokenDomain;
+}
+
+export circuit getTokenType(): Bytes<32> {
+  return tokenType(_tokenDomain, kernel.self());
+}
+
+export circuit getSignerCount(): Uint<8> {
+  return Signer_getSignerCount();
+}
+
+export circuit getThreshold(): Uint<8> {
+  return Signer_getThreshold();
+}
+
+export circuit isSigner(commitment: Bytes<32>): Boolean {
+  return Signer_isSigner(commitment);
+}
